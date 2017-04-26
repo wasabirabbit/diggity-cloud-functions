@@ -35,6 +35,15 @@ exports.generateThumbnail = functions.storage.object().onChange(event => {
     const fileBucket = object.bucket; // The Storage bucket that contains the file.
     const filePath = object.name; // File path in the bucket.
     const contentType = object.contentType; // File content type.
+    console.log("File Content Type: " + contentType);
+
+    // Declare default file extension.
+    let fileExtn = ".png";
+
+    // Check content type to set file extension.
+    if (contentType && contentType == "image/png") {
+        fileExtn = ".png"
+    }
     const resourceState = object.resourceState; // The resourceState is 'exists' or 'not_exists' (for file/folder deletions).
     // [END eventAttributes]
 
@@ -63,7 +72,7 @@ exports.generateThumbnail = functions.storage.object().onChange(event => {
     // [START thumbnailGeneration]
     // Download file from bucket.
     const bucket = gcs.bucket(fileBucket);
-    const tempFilePath = `/tmp/${fileName}`;
+    const tempFilePath = `/tmp/${fileName}.${fileExtn}`;
     return bucket.file(filePath).download({
         destination: tempFilePath
     }).then(() => {
