@@ -41,8 +41,30 @@ exports.generateThumbnail = functions.storage.object().onChange(event => {
     let fileExtn = ".png";
 
     // Check content type to set file extension.
-    if (contentType && contentType == "image/png") {
-        fileExtn = ".png"
+    if (contentType) {
+        switch (contentType.toLowerCase()) {
+            case "image/png":
+                fileExtn = ".png"
+                break;
+
+            case "image/bmp":
+                fileExtn = ".bmp"
+                break;
+
+            case "image/gif":
+                fileExtn = ".gif"
+                break;
+
+            case "image/jpeg":
+            case "image/jpg":
+                fileExtn = ".jpg"
+                break;
+
+            case "image/tiff":
+            case "image/x-tiff":
+                fileExtn = ".tiff"
+                break;
+        }
     }
     const resourceState = object.resourceState; // The resourceState is 'exists' or 'not_exists' (for file/folder deletions).
     // [END eventAttributes]
