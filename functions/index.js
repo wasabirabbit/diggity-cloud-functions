@@ -19,7 +19,15 @@
 const functions = require('firebase-functions');
 const gcs = require('@google-cloud/storage')();
 const spawn = require('child-process-promise').spawn;
+const admin = require('firebase-admin');
+const adminSdkPrivateKey = require('./diggity-development-firebase-adminsdk-private-key.json');
+const request = require('request');
+const cors = require('cors')({origin: true});
 // [END import]
+
+const firebaseConfig = functions.config().firebase;
+firebaseConfig.credential = admin.credential.cert(adminSdkPrivateKey);
+admin.initializeApp(firebaseConfig);
 
 // [START generateThumbnail]
 /**
@@ -113,3 +121,97 @@ exports.generateThumbnail = functions.storage.object().onChange(event => {
     // [END thumbnailGeneration]
 });
 // [END generateThumbnail]
+
+// [START handleInstagramLogin]
+/**
+ * Handle Instagram login.
+ */
+// [START handleInstagramLoginTrigger]
+exports.handleInstagramLogin = functions.https.onRequest((req, res) => {
+    cors(req, res, () => {
+        if (req && req.query && req.query.code) {
+            let instagramAuthCode = req.query.code;
+
+            request.post({
+                url: "https://api.instagram.com/oauth/access_token",
+                form: {
+                    client_id: "6625ab51e95d4311b8cd7e7d1dd242ca",
+                    client_secret: "b3637ecaa6c64dc7b867de13ad89d565",
+                    grant_type: "authorization_code",
+                    redirect_uri: "http://localhost:8100/callback",
+                    code: instagramAuthCode
+                }
+            }, function (error, response, body) {
+                let isBodyParseable = true;
+
+                try {
+                    body = JSON.parse(body);
+                } catch(e) {
+                    isBodyParseable = false;
+                }
+
+                if (isBodyParseable) {
+                    if (!error && response && response.statusCode == 200 && body && body.access_token && body.user && body.user.id) {
+                        let instagramUserId = body.user.id;
+
+                        let updates = {};
+                        updates["/instagramIdentities/" + instagramUserId] = {
+                            accessToken: body.access_token,
+                            user: body.user
+                        };
+
+                        admin.database().ref().update(updates).then(() => {
+                            let firebaseUserId = "instagramUserId::" + instagramUserId;
+
+                            let isUserPropertiesFound = false;
+                            let userProperties = {};
+                            if (body.user.full_name) {
+                                userProperties.displayName = body.user.full_name;
+                                isUserPropertiesFound = true;
+                            }
+                            if (body.user.profile_picture) {
+                                userProperties.photoURL = body.user.profile_picture;
+                                isUserPropertiesFound = true;
+                            }
+
+                            let promise = Promise.resolve();
+                            if (isUserPropertiesFound) {
+                                promise = admin.auth().updateUser(firebaseUserId, userProperties).catch(error => {
+                                    if (error.code === "auth/user-not-found") {
+                                        userProperties.uid = firebaseUserId;
+
+                                        return admin.auth().createUser(userProperties).catch(() => {
+                                            return Promise.resolve();
+                                        });
+                                    } else {
+                                        return Promise.resolve();
+                                    }
+                                });
+                            }
+
+                            promise.then(() => {
+                                admin.auth().createCustomToken(firebaseUserId).then((customToken) => {
+                                    res.status(200).send({ token: customToken });
+                                }).catch(() => {
+                                    res.status(200).send({ error: true });
+                                });
+                            });
+                        }).catch(() => {
+                            res.status(200).send({ error: true });
+                        });
+                    } else if (body && body.error_message) {
+                        res.status(200).send({ message: body.error_message });
+                    } else {
+                        res.status(200).send({ error: true });
+                    }
+                } else {
+                    res.status(200).send({ error: true });
+                }
+            });
+        } else {
+            res.status(200).send({ error: true });
+        }
+    });
+});
+// [END handleInstagramLoginTrigger]
+// [END handleInstagramLogin]
