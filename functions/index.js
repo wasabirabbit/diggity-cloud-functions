@@ -130,80 +130,125 @@ exports.generateThumbnail = functions.storage.object().onChange(event => {
 exports.handleInstagramLogin = functions.https.onRequest((req, res) => {
     cors(req, res, () => {
         if (req && req.query && req.query.code) {
-            let instagramAuthCode = req.query.code;
+            let islinking = req.query.uid ? true : false;
 
-            request.post({
-                url: "https://api.instagram.com/oauth/access_token",
-                form: {
-                    client_id: "6625ab51e95d4311b8cd7e7d1dd242ca",
-                    client_secret: "b3637ecaa6c64dc7b867de13ad89d565",
-                    grant_type: "authorization_code",
-                    redirect_uri: "http://localhost:8100/callback",
-                    code: instagramAuthCode
-                }
-            }, function (error, response, body) {
-                let isBodyParseable = true;
+            let promiseFirebaseUserRecordForLinking = Promise.resolve({});
+            if (islinking) {
+                promiseFirebaseUserRecordForLinking = admin.auth().getUser(req.query.uid).then((userRecord) => {
+                    if (userRecord) {
+                        return Promise.resolve(userRecord);
+                    } else {
+                        return Promise.resolve(null);
+                    }
+                }).catch(() => {
+                    return Promise.resolve(null);
+                });
+            }
+            promiseFirebaseUserRecordForLinking.then(firebaseUserRecordForLinking => {
+                if (firebaseUserRecordForLinking) {
+                    let instagramAuthCode = req.query.code;
 
-                try {
-                    body = JSON.parse(body);
-                } catch(e) {
-                    isBodyParseable = false;
-                }
+                    request.post({
+                        url: "https://api.instagram.com/oauth/access_token",
+                        form: {
+                            client_id: "6625ab51e95d4311b8cd7e7d1dd242ca",
+                            client_secret: "b3637ecaa6c64dc7b867de13ad89d565",
+                            grant_type: "authorization_code",
+                            redirect_uri: "http://localhost:8100/callback",
+                            code: instagramAuthCode
+                        }
+                    }, function (error, response, body) {
+                        let isBodyParseable = true;
 
-                if (isBodyParseable) {
-                    if (!error && response && response.statusCode == 200 && body && body.access_token && body.user && body.user.id) {
-                        let instagramUserId = body.user.id;
+                        try {
+                            body = JSON.parse(body);
+                        } catch(e) {
+                            isBodyParseable = false;
+                        }
 
-                        let updates = {};
-                        updates["/instagramIdentities/" + instagramUserId] = {
-                            accessToken: body.access_token,
-                            user: body.user
-                        };
+                        if (isBodyParseable) {
+                            if (!error && response && response.statusCode === 200 && body && body.access_token && body.user && body.user.id) {
+                                let instagramUserId = body.user.id;
+                                let firebaseUserId = (islinking ? req.query.uid : "instagramUserId::" + instagramUserId);
 
-                        admin.database().ref().update(updates).then(() => {
-                            let firebaseUserId = "instagramUserId::" + instagramUserId;
-
-                            let isUserPropertiesFound = false;
-                            let userProperties = {};
-                            if (body.user.full_name) {
-                                userProperties.displayName = body.user.full_name;
-                                isUserPropertiesFound = true;
-                            }
-                            if (body.user.profile_picture) {
-                                userProperties.photoURL = body.user.profile_picture;
-                                isUserPropertiesFound = true;
-                            }
-
-                            let promise = Promise.resolve();
-                            if (isUserPropertiesFound) {
-                                promise = admin.auth().updateUser(firebaseUserId, userProperties).catch(error => {
-                                    if (error.code === "auth/user-not-found") {
-                                        userProperties.uid = firebaseUserId;
-
-                                        return admin.auth().createUser(userProperties).catch(() => {
-                                            return Promise.resolve();
-                                        });
+                                let promiseIsInstagramIdentityAlreadyAvailable = Promise.resolve(false);
+                                if (islinking) {
+                                    promiseIsInstagramIdentityAlreadyAvailable = admin.database().ref("/instagramIdentities/" + instagramUserId).once("value").then(function (snapshot) {
+                                        if (snapshot.val()) {
+                                            return Promise.resolve(true);
+                                        } else {
+                                            return Promise.resolve(false);
+                                        }
+                                    }).catch(() => {
+                                        return Promise.resolve(false);
+                                    });
+                                }
+                                promiseIsInstagramIdentityAlreadyAvailable.then(isInstagramIdentityAlreadyAvailable => {
+                                    if (isInstagramIdentityAlreadyAvailable) {
+                                        res.status(200).send({ instagramUserAlreadyExists: true });
                                     } else {
-                                        return Promise.resolve();
+                                        let updates = {};
+                                        updates["/instagramIdentities/" + instagramUserId] = {
+                                            accessToken: body.access_token,
+                                            user: body.user
+                                        };
+                                        updates["/userInstagramIdentities/" + firebaseUserId] = {
+                                            instagramUserId: instagramUserId
+                                        };
+
+                                        admin.database().ref().update(updates).then(() => {
+                                            let isUserPropertiesFound = false;
+                                            let userProperties = {};
+
+                                            if ((!firebaseUserRecordForLinking.displayName || firebaseUserRecordForLinking.displayName === "") && body.user.full_name) {
+                                                userProperties.displayName = body.user.full_name;
+                                                isUserPropertiesFound = true;
+                                            }
+                                            if ((!firebaseUserRecordForLinking.photoURL || firebaseUserRecordForLinking.photoURL === "") && body.user.profile_picture) {
+                                                userProperties.photoURL = body.user.profile_picture;
+                                                isUserPropertiesFound = true;
+                                            }
+
+                                            let promiseUpdateOrCreateFirebaseUser = Promise.resolve();
+                                            if (isUserPropertiesFound) {
+                                                promiseUpdateOrCreateFirebaseUser = admin.auth().updateUser(firebaseUserId, userProperties).catch(error => {
+                                                    if (!islinking && error.code === "auth/user-not-found") {
+                                                        userProperties.uid = firebaseUserId;
+
+                                                        return admin.auth().createUser(userProperties).catch(() => {
+                                                            return Promise.resolve();
+                                                        });
+                                                    } else {
+                                                        return Promise.resolve();
+                                                    }
+                                                });
+                                            }
+
+                                            promiseUpdateOrCreateFirebaseUser.then(() => {
+                                                if (islinking) {
+                                                    res.status(200).send({ islinked: true });
+                                                } else {
+                                                    admin.auth().createCustomToken(firebaseUserId).then((customToken) => {
+                                                        res.status(200).send({ token: customToken });
+                                                    }).catch(() => {
+                                                        res.status(200).send({ error: true });
+                                                    });
+                                                }
+                                            });
+                                        }).catch(() => {
+                                            res.status(200).send({ error: true });
+                                        });
                                     }
                                 });
+                            } else if (body && body.error_message) {
+                                res.status(200).send({ message: body.error_message });
+                            } else {
+                                res.status(200).send({ error: true });
                             }
-
-                            promise.then(() => {
-                                admin.auth().createCustomToken(firebaseUserId).then((customToken) => {
-                                    res.status(200).send({ token: customToken });
-                                }).catch(() => {
-                                    res.status(200).send({ error: true });
-                                });
-                            });
-                        }).catch(() => {
+                        } else {
                             res.status(200).send({ error: true });
-                        });
-                    } else if (body && body.error_message) {
-                        res.status(200).send({ message: body.error_message });
-                    } else {
-                        res.status(200).send({ error: true });
-                    }
+                        }
+                    });
                 } else {
                     res.status(200).send({ error: true });
                 }
