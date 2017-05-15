@@ -169,27 +169,19 @@ exports.handleInstagramLogin = functions.https.onRequest((req, res) => {
                         if (isBodyParseable) {
                             if (!error && response && response.statusCode === 200 && body && body.access_token && body.user && body.user.id) {
                                 let instagramUserId = body.user.id;
-                                let firebaseUserId = (islinking ? req.query.uid : "instagramUserId::" + instagramUserId);
 
-                                let promiseIsInstagramIdentityAlreadyAvailable = Promise.resolve(false);
-                                if (islinking) {
-                                    promiseIsInstagramIdentityAlreadyAvailable = admin.database().ref("/instagramIdentities/" + instagramUserId).once("value").then(function (snapshot) {
-                                        if (snapshot.val()) {
-                                            return Promise.resolve(true);
-                                        } else {
-                                            return Promise.resolve(false);
-                                        }
-                                    }).catch(() => {
-                                        return Promise.resolve(false);
-                                    });
-                                }
-                                promiseIsInstagramIdentityAlreadyAvailable.then(isInstagramIdentityAlreadyAvailable => {
-                                    if (isInstagramIdentityAlreadyAvailable) {
+                                admin.database().ref("/instagramIdentities/" + instagramUserId).once("value").then(function (snapshot) {
+                                    let instagramIdentity = snapshot.val();
+
+                                    if (islinking && instagramIdentity) {
                                         res.status(200).send({ instagramUserAlreadyExists: true });
                                     } else {
+                                        let firebaseUserId = (islinking ? req.query.uid : (instagramIdentity && instagramIdentity.firebaseUserId ? instagramIdentity.firebaseUserId : "instagramUserId::" + instagramUserId));
+
                                         let updates = {};
                                         updates["/instagramIdentities/" + instagramUserId] = {
                                             accessToken: body.access_token,
+                                            firebaseUserId: firebaseUserId,
                                             user: body.user
                                         };
                                         updates["/userInstagramIdentities/" + firebaseUserId] = {
@@ -239,6 +231,8 @@ exports.handleInstagramLogin = functions.https.onRequest((req, res) => {
                                             res.status(200).send({ error: true });
                                         });
                                     }
+                                }).catch(() => {
+                                    res.status(200).send({ error: true });
                                 });
                             } else if (body && body.error_message) {
                                 res.status(200).send({ message: body.error_message });
