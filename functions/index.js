@@ -21,6 +21,7 @@ const gcs = require('@google-cloud/storage')();
 const spawn = require('child-process-promise').spawn;
 const admin = require('firebase-admin');
 const adminSdkPrivateKey = require('./diggity-development-firebase-adminsdk-private-key.json');
+const instagramConfig = require('./instagram-config.json');
 const request = require('request');
 const cors = require('cors')({origin: true});
 // [END import]
@@ -149,12 +150,12 @@ exports.handleInstagramLogin = functions.https.onRequest((req, res) => {
                     let instagramAuthCode = req.query.code;
 
                     request.post({
-                        url: "https://api.instagram.com/oauth/access_token",
+                        url: instagramConfig.instagramOauthUrl,
                         form: {
-                            client_id: "6625ab51e95d4311b8cd7e7d1dd242ca",
-                            client_secret: "b3637ecaa6c64dc7b867de13ad89d565",
+                            client_id: instagramConfig.instagramClientId,
+                            client_secret: instagramConfig.instagramClientSecret,
                             grant_type: "authorization_code",
-                            redirect_uri: "http://localhost:8100/callback",
+                            redirect_uri: instagramConfig.redirectUrl,
                             code: instagramAuthCode
                         }
                     }, function (error, response, body) {
