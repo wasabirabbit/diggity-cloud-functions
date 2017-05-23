@@ -23,7 +23,7 @@ const admin = require('firebase-admin');
 const adminSdkPrivateKey = require('./diggity-development-firebase-adminsdk-private-key.json');
 const instagramConfig = require('./instagram-config.json');
 const request = require('request');
-const cors = require('cors')({origin: true});
+const cors = require('cors')({ origin: true });
 // [END import]
 
 const firebaseConfig = functions.config().firebase;
@@ -108,11 +108,36 @@ exports.generateThumbnail = functions.storage.object().onChange(event => {
         destination: tempFilePath
     }).then(() => {
         console.log('Image downloaded locally to', tempFilePath);
+
         // Generate a thumbnail using ImageMagick.
-        return spawn('convert', [tempFilePath, '-thumbnail', '200x200>', tempFilePath]).then(() => {
+
+        // 200x200 
+        spawn('convert', [tempFilePath, '-thumbnail', '200x200>', tempFilePath]).then(() => {
             console.log('Thumbnail created at', tempFilePath);
             // We add a 'thumb_' prefix to thumbnails file name. That's where we'll upload the thumbnail.
-            const thumbFilePath = fileName + '/' + filePath.replace(/(\/)?([^\/]*)$/, `$1thumb_$2`);
+            const thumbFilePath = fileName + '/' + filePath.replace(/(\/)?([^\/]*)$/, `$1thumb_$2_200_200`);
+            // Uploading the thumbnail.
+            return bucket.upload(tempFilePath, {
+                destination: thumbFilePath
+            });
+        });
+
+        // 400x400 
+        spawn('convert', [tempFilePath, '-thumbnail', '400x400>', tempFilePath]).then(() => {
+            console.log('Thumbnail created at', tempFilePath);
+            // We add a 'thumb_' prefix to thumbnails file name. That's where we'll upload the thumbnail.
+            const thumbFilePath = fileName + '/' + filePath.replace(/(\/)?([^\/]*)$/, `$1thumb_$2_400_400`);
+            // Uploading the thumbnail.
+            return bucket.upload(tempFilePath, {
+                destination: thumbFilePath
+            });
+        });
+
+        // 600x600 
+        return spawn('convert', [tempFilePath, '-thumbnail', '600x600>', tempFilePath]).then(() => {
+            console.log('Thumbnail created at', tempFilePath);
+            // We add a 'thumb_' prefix to thumbnails file name. That's where we'll upload the thumbnail.
+            const thumbFilePath = fileName + '/' + filePath.replace(/(\/)?([^\/]*)$/, `$1thumb_$2_600_600`);
             // Uploading the thumbnail.
             return bucket.upload(tempFilePath, {
                 destination: thumbFilePath
@@ -163,7 +188,7 @@ exports.handleInstagramLogin = functions.https.onRequest((req, res) => {
 
                         try {
                             body = JSON.parse(body);
-                        } catch(e) {
+                        } catch (e) {
                             isBodyParseable = false;
                         }
 
