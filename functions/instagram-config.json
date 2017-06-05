@@ -1,6 +1,6 @@
 {
   "instagramOauthUrl": "https://api.instagram.com/oauth/access_token",
-  "instagramClientId": "6625ab51e95d4311b8cd7e7d1dd242ca",
-  "instagramClientSecret": "b3637ecaa6c64dc7b867de13ad89d565",
+  "instagramClientId": "67c3a6c5bff34863809b9a29e7e00e61",
+  "instagramClientSecret": "4830789ab33d4c71bbc88fd214146ad0",
   "redirectUrl": "http://localhost:8100/callback"
 }
