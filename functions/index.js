@@ -111,6 +111,14 @@ exports.generateThumbnail = functions.storage.object().onChange(event => {
 
         // Generate a thumbnail using ImageMagick.
 
+
+        // START of all NEW thumbnailing methods
+
+
+        // END of all NEW thumbnailing methods
+
+        // START of all OLD thumbnailing methods. to be REMOVED
+
         // 200x200 
         spawn('convert', [tempFilePath, '-thumbnail', '200x200>', tempFilePath]).then(() => {
             console.log('Thumbnail created at', tempFilePath);
@@ -143,6 +151,10 @@ exports.generateThumbnail = functions.storage.object().onChange(event => {
                 destination: thumbFilePath
             });
         });
+
+        // END of all OLD thumbnailing methods. to be REMOVED
+
+
     });
     // [END thumbnailGeneration]
 });
