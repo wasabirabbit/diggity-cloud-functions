@@ -112,7 +112,7 @@ exports.generateThumbnail = functions.storage.object().onChange(event => {
     return bucket.file(filePath).download({
         destination: tempSourceFilePath
     }).then(() => {
-        console.log('Image downloaded locally to', tempSourceFilePath);
+        console.log('Source image downloaded locally to', tempSourceFilePath);
 
         // generate a square thumbnail with centered and cropped image
         const tempSpawnedFilePath01 = `/tmp/${fileName}_thumb_128x128${fileExtn}`;
@@ -127,7 +127,7 @@ exports.generateThumbnail = functions.storage.object().onChange(event => {
         ];
 
         spawn('convert', thumb_128x128_args).then(() => {
-            console.log('Thumbnail created at', tempSpawnedFilePath01);
+            console.log('128x128 cropped thumbnail created at', tempSpawnedFilePath01);
             // We add a 'thumb_' prefix to thumbnails file name. That's where we'll upload the thumbnail.
             const thumbFilePath = fileName + '/' + filePath.replace(/(\/)?([^\/]*)$/, `$1thumb_$2_128x128`);
             // Uploading the thumbnail.
@@ -141,7 +141,7 @@ exports.generateThumbnail = functions.storage.object().onChange(event => {
         // used in 3 column staggered image grids
         const tempSpawnedFilePath02 = `/tmp/${fileName}_preview_200x${fileExtn}`;
         spawn('convert', [tempSourceFilePath, '-resize', '200x', tempSpawnedFilePath02] ).then(() => {
-            console.log('Preview created at', tempSpawnedFilePath02);
+            console.log('200px wide preview created at', tempSpawnedFilePath02);
             // We add a 'preview_' prefix to preview file name. That's where we'll upload the preview.
             const previewFilePath = fileName + '/' + filePath.replace(/(\/)?([^\/]*)$/, `$1preview_$2_200x`);
             // Uploading the thumbnail.
@@ -154,7 +154,7 @@ exports.generateThumbnail = functions.storage.object().onChange(event => {
         // used as full width picture in an entry
         const tempSpawnedFilePath03 = `/tmp/${fileName}_preview_800x${fileExtn}`;
         spawn('convert', [tempSourceFilePath, '-resize', '800x', tempSpawnedFilePath03] ).then(() => {
-            console.log('Preview created at', tempSpawnedFilePath03);
+            console.log('800px wide preview created at', tempSpawnedFilePath03);
             // We add a 'preview_' prefix to preview file name. That's where we'll upload the preview.
             const previewFilePath = fileName + '/' + filePath.replace(/(\/)?([^\/]*)$/, `$1preview_$2_800x`);
             // Uploading the thumbnail.
@@ -171,7 +171,7 @@ exports.generateThumbnail = functions.storage.object().onChange(event => {
         // 200x200 
         const tempSpawnedFilePath04 = `/tmp/${fileName}_thumb_200x200${fileExtn}`;
        spawn('convert', [tempSourceFilePath, '-thumbnail', '200x200>', tempSpawnedFilePath04]).then(() => {
-            console.log('Thumbnail created at', tempSpawnedFilePath04);
+            console.log('DEPRECATED 200x200 Thumbnail created at', tempSpawnedFilePath04);
             // We add a 'thumb_' prefix to thumbnails file name. That's where we'll upload the thumbnail.
             const thumbFilePath = fileName + '/' + filePath.replace(/(\/)?([^\/]*)$/, `$1thumb_$2_200_200`);
             // Uploading the thumbnail.
@@ -181,26 +181,28 @@ exports.generateThumbnail = functions.storage.object().onChange(event => {
         });
 
         // // 400x400 
-        // spawn('convert', [tempSourceFilePath, '-thumbnail', '400x400>', tempSpawnedFilePath]).then(() => {
-        //     console.log('Thumbnail created at', tempSpawnedFilePath);
-        //     // We add a 'thumb_' prefix to thumbnails file name. That's where we'll upload the thumbnail.
-        //     const thumbFilePath = fileName + '/' + filePath.replace(/(\/)?([^\/]*)$/, `$1thumb_$2_400_400`);
-        //     // Uploading the thumbnail.
-        //     return bucket.upload(tempSpawnedFilePath, {
-        //         destination: thumbFilePath
-        //     });
-        // });
+        const tempSpawnedFilePath05 = `/tmp/${fileName}_thumb_200x200${fileExtn}`;
+        spawn('convert', [tempSourceFilePath, '-thumbnail', '400x400>', tempSpawnedFilePath05]).then(() => {
+            console.log('DEPRECATED 400x400 Thumbnail created at', tempSpawnedFilePath05);
+            // We add a 'thumb_' prefix to thumbnails file name. That's where we'll upload the thumbnail.
+            const thumbFilePath = fileName + '/' + filePath.replace(/(\/)?([^\/]*)$/, `$1thumb_$2_400_400`);
+            // Uploading the thumbnail.
+            return bucket.upload(tempSpawnedFilePath05, {
+                destination: thumbFilePath
+            });
+        });
 
-        // // 600x600 
-        // return spawn('convert', [tempSourceFilePath, '-thumbnail', '600x600>', tempSpawnedFilePath]).then(() => {
-        //     console.log('Thumbnail created at', tempSpawnedFilePath);
-        //     // We add a 'thumb_' prefix to thumbnails file name. That's where we'll upload the thumbnail.
-        //     const thumbFilePath = fileName + '/' + filePath.replace(/(\/)?([^\/]*)$/, `$1thumb_$2_600_600`);
-        //     // Uploading the thumbnail.
-        //     return bucket.upload(tempSpawnedFilePath, {
-        //         destination: thumbFilePath
-        //     });
-        // });
+        // 600x600 
+        const tempSpawnedFilePath06 = `/tmp/${fileName}_thumb_200x200${fileExtn}`;
+        return spawn('convert', [tempSourceFilePath, '-thumbnail', '600x600>', tempSpawnedFilePath06]).then(() => {
+            console.log('DEPRECATED 600x600 Thumbnail created at', tempSpawnedFilePath06);
+            // We add a 'thumb_' prefix to thumbnails file name. That's where we'll upload the thumbnail.
+            const thumbFilePath = fileName + '/' + filePath.replace(/(\/)?([^\/]*)$/, `$1thumb_$2_600_600`);
+            // Uploading the thumbnail.
+            return bucket.upload(tempSpawnedFilePath06, {
+                destination: thumbFilePath
+            });
+        });
 
         // END of all OLD thumbnailing methods. to be REMOVED
 
