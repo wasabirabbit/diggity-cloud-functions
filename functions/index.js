@@ -215,18 +215,19 @@ exports.generateThumbnail = functions.storage.object().onChange(event => {
         });
 
 
-        // generate a 2048px wide preview of the source image, preserving aspect ratio
-        // used as full width picture in an entry on larges screens in portrait mode, web app, and in picture previews
-        const tmpPreview2048xFilePath = `/tmp/${fileName}_preview_2048x${fileExtn}`;
-        spawn('convert', [tempSourceFilePath, '-resize', '2048x', tmpPreview2048xFilePath] ).then(() => {
-            console.log('2048px wide preview created at', tmpPreview2048xFilePath);
-            // We add a 'preview_' prefix to preview file name. That's where we'll upload the preview.
-            const previewFilePath = fileName + '/' + filePath.replace(/(\/)?([^\/]*)$/, `$1preview_$2_2048x`);
-            // Uploading the thumbnail.
-            return bucket.upload(tmpPreview2048xFilePath, {
-                destination: previewFilePath
-            });
-        });
+        // turn off last method since it throws an obscure error; mayb upsampling doesn't work?
+        // // generate a 2048px wide preview of the source image, preserving aspect ratio
+        // // used as full width picture in an entry on larges screens in portrait mode, web app, and in picture previews
+        // const tmpPreview2048xFilePath = `/tmp/${fileName}_preview_2048x${fileExtn}`;
+        // spawn('convert', [tempSourceFilePath, '-resize', '2048x', tmpPreview2048xFilePath] ).then(() => {
+        //     console.log('2048px wide preview created at', tmpPreview2048xFilePath);
+        //     // We add a 'preview_' prefix to preview file name. That's where we'll upload the preview.
+        //     const previewFilePath = fileName + '/' + filePath.replace(/(\/)?([^\/]*)$/, `$1preview_$2_2048x`);
+        //     // Uploading the thumbnail.
+        //     return bucket.upload(tmpPreview2048xFilePath, {
+        //         destination: previewFilePath
+        //     });
+        // });
 
 
 
