@@ -108,28 +108,29 @@ exports.generateThumbnail = functions.storage.object().onChange(event => {
     // [START thumbnailGeneration]
     // Download file from bucket.
     const bucket = gcs.bucket(fileBucket);
-    const tempFilePath = `/tmp/${fileName}.${fileExtn}`;
+    const tempSourceFilePath = `/tmp/${fileName}.${fileExtn}`;
+    const tempSpawnedFilePath = `/tmp/${fileName}_spawned.${fileExtn}`;
     return bucket.file(filePath).download({
-        destination: tempFilePath
+        destination: tempSourceFilePath
     }).then(() => {
-        console.log('Image downloaded locally to', tempFilePath);
+        console.log('Image downloaded locally to', tempSourceFilePath);
 
         // generate a square thumbnail with centered and cropped image
         const thumb_128x128_args = [
-            tempFilePath, 
+            tempSourceFilePath, 
             '-resize', '128x',          // resize width to 128
             '-resize', 'x128<',         // then resize by height if it's smaller than 128
             '-gravity', 'center',       // sets the offset to the center
             '-crop', '128x128+0+0',     // crop
-            tempFilePath
+            tempSpawnedFilePath
         ];
-        
+
         spawn('convert', thumb_128x128_args).then(() => {
-            console.log('Thumbnail created at', tempFilePath);
+            console.log('Thumbnail created at', tempSpawnedFilePath);
             // We add a 'thumb_' prefix to thumbnails file name. That's where we'll upload the thumbnail.
             const thumbFilePath = fileName + '/' + filePath.replace(/(\/)?([^\/]*)$/, `$1thumb_$2_128x128`);
             // Uploading the thumbnail.
-            return bucket.upload(tempFilePath, {
+            return bucket.upload(tempSpawnedFilePath, {
                 destination: thumbFilePath
             });
         });
@@ -137,24 +138,24 @@ exports.generateThumbnail = functions.storage.object().onChange(event => {
 
         // generate a 200px wide preview of the source image, preserving aspect ratio
         // used in 3 column staggered image grids
-        spawn('convert', [tempFilePath, '-resize', '200x', tempFilePath] ).then(() => {
-            console.log('Preview created at', tempFilePath);
+        spawn('convert', [tempSourceFilePath, '-resize', '200x', tempSpawnedFilePath] ).then(() => {
+            console.log('Preview created at', tempSpawnedFilePath);
             // We add a 'preview_' prefix to preview file name. That's where we'll upload the preview.
             const previewFilePath = fileName + '/' + filePath.replace(/(\/)?([^\/]*)$/, `$1preview_$2_200x`);
             // Uploading the thumbnail.
-            return bucket.upload(tempFilePath, {
+            return bucket.upload(tempSpawnedFilePath, {
                 destination: previewFilePath
             });
         });
 
         // generate a 800px wide preview of the source image, preserving aspect ratio
         // used as full width picture in an entry
-        spawn('convert', [tempFilePath, '-resize', '800x', tempFilePath] ).then(() => {
-            console.log('Preview created at', tempFilePath);
+        spawn('convert', [tempSourceFilePath, '-resize', '800x', tempSpawnedFilePath] ).then(() => {
+            console.log('Preview created at', tempSpawnedFilePath);
             // We add a 'preview_' prefix to preview file name. That's where we'll upload the preview.
             const previewFilePath = fileName + '/' + filePath.replace(/(\/)?([^\/]*)$/, `$1preview_$2_800x`);
             // Uploading the thumbnail.
-            return bucket.upload(tempFilePath, {
+            return bucket.upload(tempSpawnedFilePath, {
                 destination: previewFilePath
             });
         });
@@ -165,34 +166,34 @@ exports.generateThumbnail = functions.storage.object().onChange(event => {
         // START of all OLD thumbnailing methods. to be REMOVED
 
         // 200x200 
-        spawn('convert', [tempFilePath, '-thumbnail', '200x200>', tempFilePath]).then(() => {
-            console.log('Thumbnail created at', tempFilePath);
+        spawn('convert', [tempSourceFilePath, '-thumbnail', '200x200>', tempSpawnedFilePath]).then(() => {
+            console.log('Thumbnail created at', tempSpawnedFilePath);
             // We add a 'thumb_' prefix to thumbnails file name. That's where we'll upload the thumbnail.
             const thumbFilePath = fileName + '/' + filePath.replace(/(\/)?([^\/]*)$/, `$1thumb_$2_200_200`);
             // Uploading the thumbnail.
-            return bucket.upload(tempFilePath, {
+            return bucket.upload(tempSpawnedFilePath, {
                 destination: thumbFilePath
             });
         });
 
         // 400x400 
-        spawn('convert', [tempFilePath, '-thumbnail', '400x400>', tempFilePath]).then(() => {
-            console.log('Thumbnail created at', tempFilePath);
+        spawn('convert', [tempSourceFilePath, '-thumbnail', '400x400>', tempSpawnedFilePath]).then(() => {
+            console.log('Thumbnail created at', tempSpawnedFilePath);
             // We add a 'thumb_' prefix to thumbnails file name. That's where we'll upload the thumbnail.
             const thumbFilePath = fileName + '/' + filePath.replace(/(\/)?([^\/]*)$/, `$1thumb_$2_400_400`);
             // Uploading the thumbnail.
-            return bucket.upload(tempFilePath, {
+            return bucket.upload(tempSpawnedFilePath, {
                 destination: thumbFilePath
             });
         });
 
         // 600x600 
-        return spawn('convert', [tempFilePath, '-thumbnail', '600x600>', tempFilePath]).then(() => {
-            console.log('Thumbnail created at', tempFilePath);
+        return spawn('convert', [tempSourceFilePath, '-thumbnail', '600x600>', tempSpawnedFilePath]).then(() => {
+            console.log('Thumbnail created at', tempSpawnedFilePath);
             // We add a 'thumb_' prefix to thumbnails file name. That's where we'll upload the thumbnail.
             const thumbFilePath = fileName + '/' + filePath.replace(/(\/)?([^\/]*)$/, `$1thumb_$2_600_600`);
             // Uploading the thumbnail.
-            return bucket.upload(tempFilePath, {
+            return bucket.upload(tempSpawnedFilePath, {
                 destination: thumbFilePath
             });
         });
