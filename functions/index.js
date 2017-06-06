@@ -93,6 +93,11 @@ exports.generateThumbnail = functions.storage.object().onChange(event => {
         return;
     }
 
+    if (fileName.startsWith('preview_')) {
+        console.log('Already a Preview.');
+        return;
+    }
+
     // Exit if this is a move or deletion event.
     if (resourceState === 'not_exists') {
         console.log('This is a deletion event.');
@@ -109,10 +114,50 @@ exports.generateThumbnail = functions.storage.object().onChange(event => {
     }).then(() => {
         console.log('Image downloaded locally to', tempFilePath);
 
-        // Generate a thumbnail using ImageMagick.
+        // generate a square thumbnail with centered and cropped image
+        const thumb_128x128_args = [
+            tempFilePath, 
+            '-resize', '128x',          // resize width to 128
+            '-resize', 'x128<',         // then resize by height if it's smaller than 128
+            '-gravity', 'center',       // sets the offset to the center
+            '-crop', '128x128+0+0',     // crop
+            tempFilePath
+        ];
+        
+        spawn('convert', thumb_128x128_args).then(() => {
+            console.log('Thumbnail created at', tempFilePath);
+            // We add a 'thumb_' prefix to thumbnails file name. That's where we'll upload the thumbnail.
+            const thumbFilePath = fileName + '/' + filePath.replace(/(\/)?([^\/]*)$/, `$1thumb_$2_128x128`);
+            // Uploading the thumbnail.
+            return bucket.upload(tempFilePath, {
+                destination: thumbFilePath
+            });
+        });
 
 
-        // START of all NEW thumbnailing methods
+        // generate a 200px wide preview of the source image, preserving aspect ratio
+        // used in 3 column staggered image grids
+        spawn('convert', [tempFilePath, '-resize', '200x', tempFilePath] ).then(() => {
+            console.log('Preview created at', tempFilePath);
+            // We add a 'preview_' prefix to preview file name. That's where we'll upload the preview.
+            const previewFilePath = fileName + '/' + filePath.replace(/(\/)?([^\/]*)$/, `$1preview_$2_200x`);
+            // Uploading the thumbnail.
+            return bucket.upload(tempFilePath, {
+                destination: previewFilePath
+            });
+        });
+
+        // generate a 800px wide preview of the source image, preserving aspect ratio
+        // used as full width picture in an entry
+        spawn('convert', [tempFilePath, '-resize', '800x', tempFilePath] ).then(() => {
+            console.log('Preview created at', tempFilePath);
+            // We add a 'preview_' prefix to preview file name. That's where we'll upload the preview.
+            const previewFilePath = fileName + '/' + filePath.replace(/(\/)?([^\/]*)$/, `$1preview_$2_800x`);
+            // Uploading the thumbnail.
+            return bucket.upload(tempFilePath, {
+                destination: previewFilePath
+            });
+        });
 
 
         // END of all NEW thumbnailing methods
