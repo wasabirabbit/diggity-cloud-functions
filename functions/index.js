@@ -39,12 +39,47 @@ admin.initializeApp(firebaseConfig);
 exports.generateThumbnail = functions.storage.object().onChange(event => {
     // [END generateThumbnailTrigger]
     // [START eventAttributes]
-    const object = event.data; // The Storage object.
+    let object = event.data; // The Storage object.
 
-    const fileBucket = object.bucket; // The Storage bucket that contains the file.
-    const filePath = object.name; // File path in the bucket.
-    const contentType = object.contentType; // File content type.
+    let resourceState = object.resourceState; // The resourceState is 'exists' or 'not_exists' (for file/folder deletions).
+
+
+    let fileBucket = object.bucket; // The Storage bucket that contains the file.
+    let filePath = object.name; // File path in the bucket.
+    console.log(filePath);
+    
+    // Get the file name.
+    let fileName = filePath.split('/').pop();
+
+    // [END eventAttributes]
+
+    // [START stopConditions]
+    // Exit if this is a move or deletion event.
+    if (resourceState === 'not_exists') {
+        console.log('This is a deletion event.');
+        return;
+    }
+
+    let contentType = object.contentType; // File content type.
     console.log("File Content Type: " + contentType);
+
+    // Exit if this is triggered on a file that is not an image.
+    if (!contentType || !contentType.startsWith('image/')) {
+        console.log('This is not an image.');
+        return;
+    }
+
+    // Exit if the image is already a thumbnail.
+    if (fileName.startsWith('thumb_')) {
+        console.log('Already a Thumbnail.');
+        return;
+    }
+
+    if (fileName.startsWith('preview_')) {
+        console.log('Already a Preview.');
+        return;
+    }
+    // [END stopConditions]
 
     // Declare default file extension.
     let fileExtn = ".png";
@@ -75,35 +110,6 @@ exports.generateThumbnail = functions.storage.object().onChange(event => {
                 break;
         }
     }
-    const resourceState = object.resourceState; // The resourceState is 'exists' or 'not_exists' (for file/folder deletions).
-    // [END eventAttributes]
-
-    // [START stopConditions]
-    // Exit if this is triggered on a file that is not an image.
-    if (!contentType.startsWith('image/')) {
-        console.log('This is not an image.');
-        return;
-    }
-
-    // Get the file name.
-    const fileName = filePath.split('/').pop();
-    // Exit if the image is already a thumbnail.
-    if (fileName.startsWith('thumb_')) {
-        console.log('Already a Thumbnail.');
-        return;
-    }
-
-    if (fileName.startsWith('preview_')) {
-        console.log('Already a Preview.');
-        return;
-    }
-
-    // Exit if this is a move or deletion event.
-    if (resourceState === 'not_exists') {
-        console.log('This is a deletion event.');
-        return;
-    }
-    // [END stopConditions]
 
     // [START thumbnailGeneration]
     // Download file from bucket.
@@ -134,7 +140,10 @@ exports.generateThumbnail = functions.storage.object().onChange(event => {
             // Uploading the thumbnail.
             return bucket.upload(tmpThumb64x64FilePath, {
                 destination: thumbFilePath
-            });
+            }).then(() => {console.log('64x64 cropped thumbnail uploaded at ', thumbFilePath);})
+            .catch(err => {console.log('64x64 cropped thumbnail upload error at ', thumbFilePath, err); });
+        }).catch(err => {
+            console.log("Error generating 64*64 thumbnail at ", tmpThumb64x64FilePath, err);
         });
 
 
@@ -156,7 +165,10 @@ exports.generateThumbnail = functions.storage.object().onChange(event => {
             // Uploading the thumbnail.
             return bucket.upload(tmpThumb256x256FilePath, {
                 destination: thumbFilePath
-            });
+            }).then(() => {console.log('256x256 cropped thumbnail uploaded at ', thumbFilePath);})
+            .catch(err => {console.log('256x256 cropped thumbnail upload error at ', thumbFilePath, err); });
+        }).catch(err => {
+            console.log("Error generating 256x256 thumbnail at ", tmpThumb256x256FilePath, err);
         });
 
         // PREVIEWS
@@ -171,7 +183,10 @@ exports.generateThumbnail = functions.storage.object().onChange(event => {
             // Uploading the thumbnail.
             return bucket.upload(tmpPreview256xFilePath, {
                 destination: previewFilePath
-            });
+            }).then(() => {console.log('256px wide preview uploaded at ', previewFilePath);})
+            .catch(err => {console.log('256px wide preview upload error at ', previewFilePath, err); });
+        }).catch(err => {
+            console.log("Error generating 256px wide preview at ", tmpPreview256xFilePath, err);
         });
 
         // generate a 512px wide preview of the source image, preserving aspect ratio
@@ -184,7 +199,10 @@ exports.generateThumbnail = functions.storage.object().onChange(event => {
             // Uploading the thumbnail.
             return bucket.upload(tmpPreview512xFilePath, {
                 destination: previewFilePath
-            });
+            }).then(() => {console.log('512px wide preview uploaded at ', previewFilePath);})
+            .catch(err => {console.log('512px wide preview upload error at ', previewFilePath, err); });
+        }).catch(err => {
+            console.log("Error generating 512px wide preview at ", tmpPreview512xFilePath, err);
         });
 
         // generate a 768px wide preview of the source image, preserving aspect ratio
@@ -197,7 +215,10 @@ exports.generateThumbnail = functions.storage.object().onChange(event => {
             // Uploading the thumbnail.
             return bucket.upload(tmpPreview768xFilePath, {
                 destination: previewFilePath
-            });
+            }).then(() => {console.log('768px wide preview uploaded at ', previewFilePath);})
+            .catch(err => {console.log('768px wide preview upload error at ', previewFilePath, err); });
+        }).catch(err => {
+            console.log("Error generating 768px wide preview at ", tmpPreview768xFilePath, err);
         });
 
 
@@ -211,7 +232,10 @@ exports.generateThumbnail = functions.storage.object().onChange(event => {
             // Uploading the thumbnail.
             return bucket.upload(tmpPreview1024xFilePath, {
                 destination: previewFilePath
-            });
+            }).then(() => {console.log('1024px wide preview uploaded at ', previewFilePath);})
+            .catch(err => {console.log('1024px wide preview upload error at ', previewFilePath, err); });
+        }).catch(err => {
+            console.log("Error generating 1024px wide preview at ", tmpPreview1024xFilePath, err);
         });
 
 
@@ -274,6 +298,8 @@ exports.generateThumbnail = functions.storage.object().onChange(event => {
         // END of all OLD thumbnailing methods. to be REMOVED
 
 
+    }).catch(reason => {
+        console.log("Error downloading file " + tempSourceFilePath, reason);
     });
     // [END thumbnailGeneration]
 });
