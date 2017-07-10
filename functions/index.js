@@ -20,10 +20,46 @@ const functions = require('firebase-functions');
 const gcs = require('@google-cloud/storage')();
 const spawn = require('child-process-promise').spawn;
 const admin = require('firebase-admin');
+const nodeTwitterApi = require("node-twitter-api");
 const adminSdkPrivateKey = require('./diggity-development-firebase-adminsdk-private-key.json');
-const instagramConfig = require('./instagram-config.json');
+const socialConfig = require('./social-config.json');
+const i18n = {
+    en: require('./i18n/en.json')
+};
+const activityTypes = {
+    diaryAdded: "diary_added",
+    diaryDeleted: "diary_deleted",
+    diaryLiked: "diary_like",
+    diaryCommented: "diary_commented",
+
+    entryAdded: "entry_added",
+    entryDeleted: "entry_deleted",
+    entryLiked: "entry_like",
+    entryCommented: "entry_commented",
+
+    storyAdded: "story_added",
+    storyDeleted: "story_deleted",
+    storyLiked: "story_like",
+    storyCommented: "story_commented",
+
+    imageAdded: "image_added",
+    imageDeleted: "image_deleted",
+    imageLiked: "image_like",
+    imageCommented: "image_commented",
+
+    collectionAdded: "collection_added",    
+    collectionDeleted: "collection_deleted",    
+    collectionLiked: "collection_like",
+    collectionCommented: "collection_commented",
+
+    videoAdded: "video_added",
+    videoDeleted: "video_deleted",
+    videoLiked: "video_like",
+    videoCommented: "video_commented"
+};
 const request = require('request');
 const cors = require('cors')({ origin: true });
+const moment = require('moment');
 // [END import]
 
 const firebaseConfig = functions.config().firebase;
@@ -39,47 +75,12 @@ admin.initializeApp(firebaseConfig);
 exports.generateThumbnail = functions.storage.object().onChange(event => {
     // [END generateThumbnailTrigger]
     // [START eventAttributes]
-    let object = event.data; // The Storage object.
+    const object = event.data; // The Storage object.
 
-    let resourceState = object.resourceState; // The resourceState is 'exists' or 'not_exists' (for file/folder deletions).
-
-
-    let fileBucket = object.bucket; // The Storage bucket that contains the file.
-    let filePath = object.name; // File path in the bucket.
-    console.log(filePath);
-    
-    // Get the file name.
-    let fileName = filePath.split('/').pop();
-
-    // [END eventAttributes]
-
-    // [START stopConditions]
-    // Exit if this is a move or deletion event.
-    if (resourceState === 'not_exists') {
-        console.log('This is a deletion event.');
-        return;
-    }
-
-    let contentType = object.contentType; // File content type.
+    const fileBucket = object.bucket; // The Storage bucket that contains the file.
+    const filePath = object.name; // File path in the bucket.
+    const contentType = object.contentType; // File content type.
     console.log("File Content Type: " + contentType);
-
-    // Exit if this is triggered on a file that is not an image.
-    if (!contentType || !contentType.startsWith('image/')) {
-        console.log('This is not an image.');
-        return;
-    }
-
-    // Exit if the image is already a thumbnail.
-    if (fileName.startsWith('thumb_')) {
-        console.log('Already a Thumbnail.');
-        return;
-    }
-
-    if (fileName.startsWith('preview_')) {
-        console.log('Already a Preview.');
-        return;
-    }
-    // [END stopConditions]
 
     // Declare default file extension.
     let fileExtn = ".png";
@@ -110,209 +111,109 @@ exports.generateThumbnail = functions.storage.object().onChange(event => {
                 break;
         }
     }
+    const resourceState = object.resourceState; // The resourceState is 'exists' or 'not_exists' (for file/folder deletions).
+    // [END eventAttributes]
+
+    // [START stopConditions]
+    // Exit if this is triggered on a file that is not an image.
+    if (!contentType.startsWith("image/")) {
+        console.log("This is not an image.");
+        return;
+    }
+
+    // Get the file name.
+    const fileName = filePath.split("/").pop();
+    // Exit if the image is already a thumbnail.
+    if (fileName.startsWith("thumb_")) {
+        console.log("Already a Thumbnail.");
+        return;
+    }
+
+    // Exit if this is a move or deletion event.
+    if (resourceState === "not_exists") {
+        console.log("This is a deletion event.");
+        return;
+    }
+    // [END stopConditions]
 
     // [START thumbnailGeneration]
     // Download file from bucket.
     const bucket = gcs.bucket(fileBucket);
-    const tempSourceFilePath = `/tmp/${fileName}${fileExtn}`;
+    const tempFilePath = `/tmp/${fileName}.${fileExtn}`;
     return bucket.file(filePath).download({
-        destination: tempSourceFilePath
+        destination: tempFilePath
     }).then(() => {
-        console.log('Source image downloaded locally to', tempSourceFilePath);
+        console.log("Image downloaded locally to", tempFilePath);
 
-        // THUMBNAILS
+        // Generate a thumbnail using ImageMagick.
 
-        // generate a small square thumbnail with centered and cropped image
-        const tmpThumb64x64FilePath = `/tmp/${fileName}_thumb_64x64${fileExtn}`;
-        const thumb_64x64_args = [
-            tempSourceFilePath, 
-            '-resize', '64x',          // resize width to 64
-            '-resize', 'x64<',         // then resize by height if it's smaller than 64
-            '-gravity', 'center',       // sets the offset to the center
-            '-crop', '64x64+0+0',     // crop
-            tmpThumb64x64FilePath
-        ];
-
-        spawn('convert', thumb_64x64_args).then(() => {
-            console.log('64x64 cropped thumbnail created at', tmpThumb64x64FilePath);
+        // 200x200 
+        spawn("convert", [tempFilePath, "-thumbnail", "200x200>", tempFilePath]).then(() => {
+            console.log("Thumbnail created at", tempFilePath);
             // We add a 'thumb_' prefix to thumbnails file name. That's where we'll upload the thumbnail.
-            const thumbFilePath = fileName + '/' + filePath.replace(/(\/)?([^\/]*)$/, `$1thumb_$2_64x64`);
+            const thumbFilePath = fileName + "/" + filePath.replace(/(\/)?([^\/]*)$/, `$1thumb_$2_200_200`);
             // Uploading the thumbnail.
-            return bucket.upload(tmpThumb64x64FilePath, {
+            return bucket.upload(tempFilePath, {
                 destination: thumbFilePath
-            }).then(() => {console.log('64x64 cropped thumbnail uploaded at ', thumbFilePath);})
-            .catch(err => {console.log('64x64 cropped thumbnail upload error at ', thumbFilePath, err); });
-        }).catch(err => {
-            console.log("Error generating 64*64 thumbnail at ", tmpThumb64x64FilePath, err);
+            });
         });
 
-
-        // generate a large square thumbnail with centered and cropped image
-        const tmpThumb256x256FilePath = `/tmp/${fileName}_thumb_256x256${fileExtn}`;
-        const thumb_256x256_args = [
-            tempSourceFilePath, 
-            '-resize', '256x',          // resize width to 256
-            '-resize', 'x256<',         // then resize by height if it's smaller than 256
-            '-gravity', 'center',       // sets the offset to the center
-            '-crop', '256x256+0+0',     // crop
-            tmpThumb256x256FilePath
-        ];
-
-        spawn('convert', thumb_256x256_args).then(() => {
-            console.log('256x256 cropped thumbnail created at', tmpThumb256x256FilePath);
+        // 400x400 
+        spawn("convert", [tempFilePath, "-thumbnail", "400x400>", tempFilePath]).then(() => {
+            console.log("Thumbnail created at", tempFilePath);
             // We add a 'thumb_' prefix to thumbnails file name. That's where we'll upload the thumbnail.
-            const thumbFilePath = fileName + '/' + filePath.replace(/(\/)?([^\/]*)$/, `$1thumb_$2_256x256`);
+            const thumbFilePath = fileName + "/" + filePath.replace(/(\/)?([^\/]*)$/, `$1thumb_$2_400_400`);
             // Uploading the thumbnail.
-            return bucket.upload(tmpThumb256x256FilePath, {
+            return bucket.upload(tempFilePath, {
                 destination: thumbFilePath
-            }).then(() => {console.log('256x256 cropped thumbnail uploaded at ', thumbFilePath);})
-            .catch(err => {console.log('256x256 cropped thumbnail upload error at ', thumbFilePath, err); });
-        }).catch(err => {
-            console.log("Error generating 256x256 thumbnail at ", tmpThumb256x256FilePath, err);
+            });
         });
 
-        // PREVIEWS
-
-        // generate a 256px wide preview of the source image, preserving aspect ratio
-        // used in 3 column staggered image grids
-        const tmpPreview256xFilePath = `/tmp/${fileName}_preview_256x${fileExtn}`;
-        spawn('convert', [tempSourceFilePath, '-resize', '256x', tmpPreview256xFilePath] ).then(() => {
-            console.log('256px wide preview created at', tmpPreview256xFilePath);
-            // We add a 'preview_' prefix to preview file name. That's where we'll upload the preview.
-            const previewFilePath = fileName + '/' + filePath.replace(/(\/)?([^\/]*)$/, `$1preview_$2_256x`);
+        // 600x600 
+        return spawn("convert", [tempFilePath, "-thumbnail", "600x600>", tempFilePath]).then(() => {
+            console.log("Thumbnail created at", tempFilePath);
+            // We add a 'thumb_' prefix to thumbnails file name. That's where we'll upload the thumbnail.
+            const thumbFilePath = fileName + "/" + filePath.replace(/(\/)?([^\/]*)$/, `$1thumb_$2_600_600`);
             // Uploading the thumbnail.
-            return bucket.upload(tmpPreview256xFilePath, {
-                destination: previewFilePath
-            }).then(() => {console.log('256px wide preview uploaded at ', previewFilePath);})
-            .catch(err => {console.log('256px wide preview upload error at ', previewFilePath, err); });
-        }).catch(err => {
-            console.log("Error generating 256px wide preview at ", tmpPreview256xFilePath, err);
+            return bucket.upload(tempFilePath, {
+                destination: thumbFilePath
+            });
         });
-
-        // generate a 512px wide preview of the source image, preserving aspect ratio
-        // used in 2 column staggered image grids
-        const tmpPreview512xFilePath = `/tmp/${fileName}_preview_512x${fileExtn}`;
-        spawn('convert', [tempSourceFilePath, '-resize', '512x', tmpPreview512xFilePath] ).then(() => {
-            console.log('512px wide preview created at', tmpPreview512xFilePath);
-            // We add a 'preview_' prefix to preview file name. That's where we'll upload the preview.
-            const previewFilePath = fileName + '/' + filePath.replace(/(\/)?([^\/]*)$/, `$1preview_$2_512x`);
-            // Uploading the thumbnail.
-            return bucket.upload(tmpPreview512xFilePath, {
-                destination: previewFilePath
-            }).then(() => {console.log('512px wide preview uploaded at ', previewFilePath);})
-            .catch(err => {console.log('512px wide preview upload error at ', previewFilePath, err); });
-        }).catch(err => {
-            console.log("Error generating 512px wide preview at ", tmpPreview512xFilePath, err);
-        });
-
-        // generate a 768px wide preview of the source image, preserving aspect ratio
-        // used as full width picture in an entry on smaller screens
-        const tmpPreview768xFilePath = `/tmp/${fileName}_preview_768x${fileExtn}`;
-        spawn('convert', [tempSourceFilePath, '-resize', '768x', tmpPreview768xFilePath] ).then(() => {
-            console.log('768px wide preview created at', tmpPreview768xFilePath);
-            // We add a 'preview_' prefix to preview file name. That's where we'll upload the preview.
-            const previewFilePath = fileName + '/' + filePath.replace(/(\/)?([^\/]*)$/, `$1preview_$2_768x`);
-            // Uploading the thumbnail.
-            return bucket.upload(tmpPreview768xFilePath, {
-                destination: previewFilePath
-            }).then(() => {console.log('768px wide preview uploaded at ', previewFilePath);})
-            .catch(err => {console.log('768px wide preview upload error at ', previewFilePath, err); });
-        }).catch(err => {
-            console.log("Error generating 768px wide preview at ", tmpPreview768xFilePath, err);
-        });
-
-
-        // generate a 1024px wide preview of the source image, preserving aspect ratio
-        // used as full width picture in an entry on larger screens and in picture previews
-        const tmpPreview1024xFilePath = `/tmp/${fileName}_preview_1024x${fileExtn}`;
-        spawn('convert', [tempSourceFilePath, '-resize', '1024x', tmpPreview1024xFilePath] ).then(() => {
-            console.log('1024px wide preview created at', tmpPreview1024xFilePath);
-            // We add a 'preview_' prefix to preview file name. That's where we'll upload the preview.
-            const previewFilePath = fileName + '/' + filePath.replace(/(\/)?([^\/]*)$/, `$1preview_$2_1024x`);
-            // Uploading the thumbnail.
-            return bucket.upload(tmpPreview1024xFilePath, {
-                destination: previewFilePath
-            }).then(() => {console.log('1024px wide preview uploaded at ', previewFilePath);})
-            .catch(err => {console.log('1024px wide preview upload error at ', previewFilePath, err); });
-        }).catch(err => {
-            console.log("Error generating 1024px wide preview at ", tmpPreview1024xFilePath, err);
-        });
-
-
-        // turn off last method since it throws an obscure error; mayb upsampling doesn't work?
-        // // generate a 2048px wide preview of the source image, preserving aspect ratio
-        // // used as full width picture in an entry on larges screens in portrait mode, web app, and in picture previews
-        // const tmpPreview2048xFilePath = `/tmp/${fileName}_preview_2048x${fileExtn}`;
-        // spawn('convert', [tempSourceFilePath, '-resize', '2048x', tmpPreview2048xFilePath] ).then(() => {
-        //     console.log('2048px wide preview created at', tmpPreview2048xFilePath);
-        //     // We add a 'preview_' prefix to preview file name. That's where we'll upload the preview.
-        //     const previewFilePath = fileName + '/' + filePath.replace(/(\/)?([^\/]*)$/, `$1preview_$2_2048x`);
-        //     // Uploading the thumbnail.
-        //     return bucket.upload(tmpPreview2048xFilePath, {
-        //         destination: previewFilePath
-        //     });
-        // });
-
-
-
-        // END of all NEW thumbnailing methods
-
-        // START of all OLD thumbnailing methods. to be REMOVED
-
-    //     // 200x200 
-    //     const tempSpawnedFilePath04 = `/tmp/${fileName}_thumb_200x200${fileExtn}`;
-    //    spawn('convert', [tempSourceFilePath, '-thumbnail', '200x200>', tempSpawnedFilePath04]).then(() => {
-    //         console.log('DEPRECATED 200x200 Thumbnail created at', tempSpawnedFilePath04);
-    //         // We add a 'thumb_' prefix to thumbnails file name. That's where we'll upload the thumbnail.
-    //         const thumbFilePath = fileName + '/' + filePath.replace(/(\/)?([^\/]*)$/, `$1thumb_$2_200_200`);
-    //         // Uploading the thumbnail.
-    //         return bucket.upload(tempSpawnedFilePath04, {
-    //             destination: thumbFilePath
-    //         });
-    //     });
-
-    //     // // 400x400 
-    //     const tempSpawnedFilePath05 = `/tmp/${fileName}_thumb_200x200${fileExtn}`;
-    //     spawn('convert', [tempSourceFilePath, '-thumbnail', '400x400>', tempSpawnedFilePath05]).then(() => {
-    //         console.log('DEPRECATED 400x400 Thumbnail created at', tempSpawnedFilePath05);
-    //         // We add a 'thumb_' prefix to thumbnails file name. That's where we'll upload the thumbnail.
-    //         const thumbFilePath = fileName + '/' + filePath.replace(/(\/)?([^\/]*)$/, `$1thumb_$2_400_400`);
-    //         // Uploading the thumbnail.
-    //         return bucket.upload(tempSpawnedFilePath05, {
-    //             destination: thumbFilePath
-    //         });
-    //     });
-
-    //     // 600x600 
-    //     const tempSpawnedFilePath06 = `/tmp/${fileName}_thumb_200x200${fileExtn}`;
-    //     return spawn('convert', [tempSourceFilePath, '-thumbnail', '600x600>', tempSpawnedFilePath06]).then(() => {
-    //         console.log('DEPRECATED 600x600 Thumbnail created at', tempSpawnedFilePath06);
-    //         // We add a 'thumb_' prefix to thumbnails file name. That's where we'll upload the thumbnail.
-    //         const thumbFilePath = fileName + '/' + filePath.replace(/(\/)?([^\/]*)$/, `$1thumb_$2_600_600`);
-    //         // Uploading the thumbnail.
-    //         return bucket.upload(tempSpawnedFilePath06, {
-    //             destination: thumbFilePath
-    //         });
-    //     });
-
-        // END of all OLD thumbnailing methods. to be REMOVED
-
-
-    }).catch(reason => {
-        console.log("Error downloading file " + tempSourceFilePath, reason);
     });
     // [END thumbnailGeneration]
 });
 // [END generateThumbnail]
 
-// [START handleInstagramLogin]
+// [START handleSocialLogin]
 /**
- * Handle Instagram login.
+ * Handle Social login using Facebook, Google, Instagram & Twitter.
  */
-// [START handleInstagramLoginTrigger]
-exports.handleInstagramLogin = functions.https.onRequest((req, res) => {
+// [START handleSocialLoginTrigger]
+exports.handleSocialLogin = functions.https.onRequest((req, res) => {
     cors(req, res, () => {
-        if (req && req.query && req.query.code) {
+        if (req && req.query && req.query.client_id && req.query.redirect_uri && req.query.redirect_uri === socialConfig.redirectUrl) {
+            let twitterApi = new nodeTwitterApi({
+                consumerKey: socialConfig.twitter.consumerKey,
+                consumerSecret: socialConfig.twitter.consumerSecret,
+                callback: socialConfig.redirectUrl
+            });
+
+            twitterApi.getRequestToken(function (error, requestToken, requestSecret) {
+                if (!error && requestToken && requestSecret) {
+                    let updates = {};
+                    updates[`/twitterRequestTokenSecrets/${req.query.client_id}`] = requestSecret;
+                    admin.database().ref().update(updates).then(() => {
+                        res.redirect(`https://api.twitter.com/oauth/authenticate?oauth_token=${requestToken}`);
+                    }).catch(() => {
+                        console.log("Unable to save Twitter RequestTokenSecret");
+                        res.redirect(socialConfig.redirectUrl);
+                    });
+                } else {
+                    console.log("Error fetching Twitter Request Token:", error);
+                    res.redirect(socialConfig.redirectUrl);
+                }
+            });
+        } else if (req && req.query && (req.query.provider && (req.query.provider === "facebook" || (req.query.provider === "google" || req.query.provider === "google-cordova") || req.query.provider === "instagram" || req.query.provider === "twitter")) && req.query.code) {
             let islinking = req.query.uid ? true : false;
 
             let promiseFirebaseUserRecordForLinking = Promise.resolve({});
@@ -329,63 +230,86 @@ exports.handleInstagramLogin = functions.https.onRequest((req, res) => {
             }
             promiseFirebaseUserRecordForLinking.then(firebaseUserRecordForLinking => {
                 if (firebaseUserRecordForLinking) {
-                    let instagramAuthCode = req.query.code;
+                    let socialLoginHandle = function (socialUserAccessToken, socialUserId, socialUserEmail, socialUserName, socialUserProfilePictureUrl, socialUserExtraData) {
+                        admin.database().ref(`/socialIdentities/${req.query.provider}/${socialUserId}`).once("value").then(function (snapshot) {
+                            let socialIdentity = snapshot.val();
+                            if (islinking && socialIdentity) {
+                                res.status(200).send({ socialUserAlreadyExists: true });
+                            } else {
+                                let promiseFirebaseUserRecordByEmail = Promise.resolve(null);
+                                if (!islinking && !socialIdentity && socialUserEmail) {
+                                    promiseFirebaseUserRecordByEmail = admin.auth().getUserByEmail(socialUserEmail).then((userRecord) => {
+                                        if (userRecord) {
+                                            return Promise.resolve(userRecord);
+                                        } else {
+                                            return Promise.resolve(null);
+                                        }
+                                    }).catch(() => {
+                                        return Promise.resolve(null);
+                                    });
+                                }
+                                promiseFirebaseUserRecordByEmail.then(firebaseUserRecordByEmail => {
+                                    if (firebaseUserRecordByEmail) {
+                                        admin.database().ref(`/userSocialIdentities/${firebaseUserRecordByEmail.uid}`).once("value").then(function (snapshot) {
+                                            let firebaseUserSocialIdentities = snapshot.val();
 
-                    request.post({
-                        url: instagramConfig.instagramOauthUrl,
-                        form: {
-                            client_id: instagramConfig.instagramClientId,
-                            client_secret: instagramConfig.instagramClientSecret,
-                            grant_type: "authorization_code",
-                            redirect_uri: instagramConfig.redirectUrl,
-                            code: instagramAuthCode
-                        }
-                    }, function (error, response, body) {
-                        let isBodyParseable = true;
+                                            let socialProviders = [];
+                                            for (let provider in firebaseUserSocialIdentities) {
+                                                socialProviders.push(provider);
+                                            }
 
-                        try {
-                            body = JSON.parse(body);
-                        } catch (e) {
-                            isBodyParseable = false;
-                        }
-
-                        if (isBodyParseable) {
-                            if (!error && response && response.statusCode === 200 && body && body.access_token && body.user && body.user.id) {
-                                let instagramUserId = body.user.id;
-
-                                admin.database().ref("/instagramIdentities/" + instagramUserId).once("value").then(function (snapshot) {
-                                    let instagramIdentity = snapshot.val();
-
-                                    if (islinking && instagramIdentity) {
-                                        res.status(200).send({ instagramUserAlreadyExists: true });
+                                            res.status(200).send({
+                                                emailAlreadyExists: true,
+                                                email: socialUserEmail,
+                                                socialProviders: socialProviders,
+                                                socialUser: {
+                                                    provider: req.query.provider,
+                                                    id: socialUserId,
+                                                    accessToken: socialUserAccessToken,
+                                                    extraData: socialUserExtraData
+                                                }
+                                            });
+                                        }).catch(() => {
+                                            res.status(200).send({ error: true });
+                                        });
                                     } else {
-                                        let firebaseUserId = (islinking ? req.query.uid : (instagramIdentity && instagramIdentity.firebaseUserId ? instagramIdentity.firebaseUserId : "instagramUserId::" + instagramUserId));
+                                        let firebaseUserId = (islinking ? req.query.uid : (socialIdentity && socialIdentity.firebaseUserId ? socialIdentity.firebaseUserId : `${req.query.provider}UserId::${socialUserId}`));
 
                                         let updates = {};
-                                        updates["/instagramIdentities/" + instagramUserId] = {
-                                            accessToken: body.access_token,
-                                            firebaseUserId: firebaseUserId,
-                                            user: body.user
+                                        updates[`/socialIdentities/${req.query.provider}/${socialUserId}`] = {
+                                            accessToken: socialUserAccessToken,
+                                            firebaseUserId: firebaseUserId
                                         };
-                                        updates["/userInstagramIdentities/" + firebaseUserId] = {
-                                            instagramUserId: instagramUserId
+                                        if (socialUserExtraData) {
+                                            for (let socialUserExtraDataKey in socialUserExtraData) {
+                                                if (socialUserExtraData[socialUserExtraDataKey]) {
+                                                    updates[`/socialIdentities/${req.query.provider}/${socialUserId}`][socialUserExtraDataKey] = socialUserExtraData[socialUserExtraDataKey];
+                                                }
+                                            }
+                                        }
+                                        updates[`/userSocialIdentities/${firebaseUserId}/${req.query.provider}`] = {
+                                            userId: socialUserId
                                         };
 
                                         admin.database().ref().update(updates).then(() => {
-                                            let isUserPropertiesFound = false;
+                                            let isUpdatedUserPropertiesFound = false;
                                             let userProperties = {};
 
-                                            if ((!firebaseUserRecordForLinking.displayName || firebaseUserRecordForLinking.displayName === "") && body.user.full_name) {
-                                                userProperties.displayName = body.user.full_name;
-                                                isUserPropertiesFound = true;
+                                            if ((!firebaseUserRecordForLinking.displayName || firebaseUserRecordForLinking.displayName === "") && socialUserName) {
+                                                userProperties.displayName = socialUserName;
+                                                isUpdatedUserPropertiesFound = true;
                                             }
-                                            if ((!firebaseUserRecordForLinking.photoURL || firebaseUserRecordForLinking.photoURL === "") && body.user.profile_picture) {
-                                                userProperties.photoURL = body.user.profile_picture;
-                                                isUserPropertiesFound = true;
+                                            if ((!firebaseUserRecordForLinking.photoURL || firebaseUserRecordForLinking.photoURL === "") && socialUserProfilePictureUrl) {
+                                                userProperties.photoURL = socialUserProfilePictureUrl;
+                                                isUpdatedUserPropertiesFound = true;
+                                            }
+                                            if (!islinking && !socialIdentity && socialUserEmail) {
+                                                userProperties.email = socialUserEmail;
+                                                isUpdatedUserPropertiesFound = true;
                                             }
 
                                             let promiseUpdateOrCreateFirebaseUser = Promise.resolve();
-                                            if (isUserPropertiesFound) {
+                                            if (isUpdatedUserPropertiesFound) {
                                                 promiseUpdateOrCreateFirebaseUser = admin.auth().updateUser(firebaseUserId, userProperties).catch(error => {
                                                     if (!islinking && error.code === "auth/user-not-found") {
                                                         userProperties.uid = firebaseUserId;
@@ -414,26 +338,757 @@ exports.handleInstagramLogin = functions.https.onRequest((req, res) => {
                                             res.status(200).send({ error: true });
                                         });
                                     }
-                                }).catch(() => {
-                                    res.status(200).send({ error: true });
                                 });
-                            } else if (body && body.error_message) {
-                                res.status(200).send({ message: body.error_message });
+                            }
+                        }).catch(() => {
+                            res.status(200).send({ error: true });
+                        });
+                    };
+
+                    if (req.query.provider === "google-cordova") {
+                        req.query.provider = "google";
+
+                        let isQueryCodeParseable = true;
+                        try {
+                            req.query.code = JSON.parse(req.query.code);
+                        } catch (e) {
+                            console.log("Code is not parsable:", {
+                                query: req.query,
+                                parseError: e
+                            });
+                            isQueryCodeParseable = false;
+                        }
+                        if (isQueryCodeParseable) {
+                            let socialUserId;
+                            let socialUserEmail;
+                            let socialUserName;
+                            let socialUserProfilePictureUrl;
+                            let socialUserServerAuthCode;
+                            let socialUserIdToken;
+                            let socialUserAccessToken;
+                            let socialUserRefreshToken;
+
+                            if (req.query.code.userId) {
+                                socialUserId = req.query.code.userId;
+                            }
+
+                            if (req.query.code.email) {
+                                socialUserEmail = req.query.code.email;
+                            }
+
+                            if (req.query.code.displayName) {
+                                socialUserName = req.query.code.displayName;
+                            }
+
+                            if (req.query.code.imageUrl) {
+                                socialUserProfilePictureUrl = req.query.code.imageUrl;
+                            }
+
+                            if (req.query.code.serverAuthCode) {
+                                socialUserServerAuthCode = req.query.code.serverAuthCode;
+                            }
+
+                            if (req.query.code.idToken) {
+                                socialUserIdToken = req.query.code.idToken;
+                            }
+
+                            if (req.query.code.accessToken) {
+                                socialUserAccessToken = req.query.code.accessToken;
+                            }
+
+                            if (req.query.code.refreshToken) {
+                                socialUserRefreshToken = req.query.code.refreshToken;
+                            }
+
+                            if (socialUserAccessToken) {
+                                socialLoginHandle(socialUserAccessToken, socialUserId, socialUserEmail, socialUserName, socialUserProfilePictureUrl, {
+                                    serverAuthCode: socialUserServerAuthCode,
+                                    idToken: socialUserIdToken,
+                                    refreshToken: socialUserRefreshToken
+                                });
+                            } else if (socialUserServerAuthCode) {
+                                request.post({
+                                    url: socialConfig.google.oAuthUrl,
+                                    form: {
+                                        client_id: socialConfig.google.clientId,
+                                        client_secret: socialConfig.google.clientSecret,
+                                        grant_type: socialConfig.grantType,
+                                        redirect_uri: socialConfig.redirectUrl,
+                                        code: socialUserServerAuthCode
+                                    }
+                                }, function (error, response, body) {
+                                    let isPostBodyParseable = true;
+                                    try {
+                                        body = JSON.parse(body);
+                                    } catch (e) {
+                                        console.log("Token Response body is not parsable:", {
+                                            query: req.query,
+                                            postData: postData,
+                                            error: error,
+                                            response: response,
+                                            body: body,
+                                            parseError: e
+                                        });
+                                        isPostBodyParseable = false;
+                                    }
+                                    if (isPostBodyParseable) {
+                                        if (!error && response && response.statusCode === 200 && body && body.access_token) {
+                                            socialLoginHandle(body.access_token, socialUserId, socialUserEmail, socialUserName, socialUserProfilePictureUrl, {
+                                                serverAuthCode: socialUserServerAuthCode,
+                                                idToken: socialUserIdToken,
+                                                refreshToken: socialUserRefreshToken
+                                            });
+                                        } else {
+                                            console.log("Unexpected Token Response:", {
+                                                query: req.query,
+                                                postData: postData,
+                                                error: error,
+                                                response: response,
+                                                body: body
+                                            });
+                                            if (body && ((body.error && body.error.message) || body.error_description || body.error_message)) {
+                                                res.status(200).send({ message: (body.error_description || body.error_message || body.error.message) });
+                                            } else {
+                                                res.status(200).send({ error: true });
+                                            }
+                                        }
+                                    } else {
+                                        res.status(200).send({ error: true });
+                                    }
+                                });
                             } else {
                                 res.status(200).send({ error: true });
                             }
                         } else {
                             res.status(200).send({ error: true });
                         }
-                    });
+                    } else if (req.query.provider === "twitter") {
+                        let isQueryCodeParseable = true;
+                        try {
+                            req.query.code = JSON.parse(req.query.code);
+                        } catch (e) {
+                            console.log("Code is not parsable:", {
+                                query: req.query,
+                                parseError: e
+                            });
+                            isQueryCodeParseable = false;
+                        }
+                        if (isQueryCodeParseable) {
+                            if (req.query.client_id) {
+                                admin.database().ref(`/twitterRequestTokenSecrets/${req.query.client_id}`).once("value").then(function (snapshot) {
+                                    let twitterRequestTokenSecret = snapshot.val();
+                                    if (twitterRequestTokenSecret) {
+                                        let updates = {};
+                                        updates[`/twitterRequestTokenSecrets/${req.query.client_id}`] = null;
+                                        let promiseRemoveTwitterRequestTokenSecret = admin.database().ref().update(updates).then(() => {
+                                        }).catch(() => {
+                                            console.log("Unable to remove Twitter RequestTokenSecret");
+                                        });
+                                        promiseRemoveTwitterRequestTokenSecret.then(() => {
+                                            if (req.query.code.oauth_token && req.query.code.oauth_verifier) {
+                                                let twitterApi = new nodeTwitterApi({
+                                                    consumerKey: socialConfig.twitter.consumerKey,
+                                                    consumerSecret: socialConfig.twitter.consumerSecret,
+                                                    callback: socialConfig.redirectUrl
+                                                });
+
+                                                twitterApi.getAccessToken(req.query.code.oauth_token, twitterRequestTokenSecret, req.query.code.oauth_verifier, function (error, accessToken, accessSecret) {
+                                                    if (!error && accessToken && accessSecret) {
+                                                        twitterApi.verifyCredentials(accessToken, accessSecret, { include_email: true }, function (error, twitterUser) {
+                                                            if (!error && twitterUser && twitterUser.id) {
+                                                                let socialUserEmail;
+                                                                let socialUserName;
+                                                                let socialUserProfilePictureUrl;
+
+                                                                if (twitterUser.email) {
+                                                                    socialUserEmail = twitterUser.email;
+                                                                }
+
+                                                                if (twitterUser.name) {
+                                                                    socialUserName = twitterUser.name;
+                                                                }
+
+                                                                if (twitterUser.profile_image_url) {
+                                                                    socialUserProfilePictureUrl = twitterUser.profile_image_url;
+                                                                } else if (twitterUser.profile_image_url_https) {
+                                                                    socialUserProfilePictureUrl = twitterUser.profile_image_url_https;
+                                                                }
+
+                                                                socialLoginHandle(accessToken, twitterUser.id, socialUserEmail, socialUserName, socialUserProfilePictureUrl, {
+                                                                    accessSecret: accessSecret
+                                                                });
+                                                            } else {
+                                                                console.log("Error verifying Twitter Access Token:", error);
+                                                                res.status(200).send({ error: true });
+                                                            }
+                                                        });
+                                                    } else {
+                                                        console.log("Error fetching Twitter Access Token:", error);
+                                                        res.status(200).send({ error: true });
+                                                    }
+                                                });
+                                            } else {
+                                                res.status(200).send({ error: true });
+                                            }
+                                        });
+                                    } else {
+                                        console.log("Unable to retrieve Twitter RequestTokenSecret");
+                                        res.status(200).send({ error: true });
+                                    }
+                                }).catch(() => {
+                                    console.log("Unable to retrieve Twitter RequestTokenSecret");
+                                    res.status(200).send({ error: true });
+                                });
+                            } else {
+                                res.status(200).send({ error: true });
+                            }
+                        } else {
+                            res.status(200).send({ error: true });
+                        }
+                    } else {
+                        let postData;
+                        if (req.query.provider === "facebook") {
+                            postData = {
+                                url: socialConfig.facebook.oAuthUrl,
+                                form: {
+                                    client_id: socialConfig.facebook.clientId,
+                                    client_secret: socialConfig.facebook.clientSecret,
+                                    grant_type: socialConfig.grantType,
+                                    redirect_uri: socialConfig.redirectUrl,
+                                    code: req.query.code
+                                }
+                            };
+                        } else if (req.query.provider === "google") {
+                            postData = {
+                                url: socialConfig.google.oAuthUrl,
+                                form: {
+                                    client_id: socialConfig.google.clientId,
+                                    client_secret: socialConfig.google.clientSecret,
+                                    grant_type: socialConfig.grantType,
+                                    redirect_uri: socialConfig.redirectUrl,
+                                    code: req.query.code
+                                }
+                            };
+                        } else if (req.query.provider === "instagram") {
+                            postData = {
+                                url: socialConfig.instagram.oAuthUrl,
+                                form: {
+                                    client_id: socialConfig.instagram.clientId,
+                                    client_secret: socialConfig.instagram.clientSecret,
+                                    grant_type: socialConfig.grantType,
+                                    redirect_uri: socialConfig.redirectUrl,
+                                    code: req.query.code
+                                }
+                            };
+                        }
+                        request.post(postData, function (error, response, body) {
+                            let isPostBodyParseable = true;
+                            try {
+                                body = JSON.parse(body);
+                            } catch (e) {
+                                console.log("Token Response body is not parsable:", {
+                                    query: req.query,
+                                    postData: postData,
+                                    error: error,
+                                    response: response,
+                                    body: body,
+                                    parseError: e
+                                });
+                                isPostBodyParseable = false;
+                            }
+                            if (isPostBodyParseable) {
+                                if (!error && response && response.statusCode === 200 && body && body.access_token) {
+                                    let socialUserAccessToken = body.access_token;
+
+                                    let getData;
+                                    if (req.query.provider === "facebook") {
+                                        getData = {
+                                            url: `https://graph.facebook.com/v2.9/me?fields=id,email,name,picture&access_token=${socialUserAccessToken}`
+                                        };
+                                    } else if (req.query.provider === "google") {
+                                        getData = {
+                                            url: `https://www.googleapis.com/oauth2/v1/userinfo?access_token=${socialUserAccessToken}`
+                                        };
+                                    } else if (req.query.provider === "instagram") {
+                                        getData = {
+                                            url: `https://api.instagram.com/v1/users/self?access_token=${socialUserAccessToken}`
+                                        };
+                                    }
+                                    request.get(getData, function (error, response, body) {
+                                        let isGetBodyParseable = true;
+                                        try {
+                                            body = JSON.parse(body);
+                                        } catch (e) {
+                                            console.log("Profile Response body is not parsable:", {
+                                                query: req.query,
+                                                getData: getData,
+                                                error: error,
+                                                response: response,
+                                                body: body,
+                                                parseError: e
+                                            });
+                                            isGetBodyParseable = false;
+                                        }
+                                        if (isGetBodyParseable) {
+                                            if (!error && response && response.statusCode === 200 && ((req.query.provider === "facebook" && body.id) || (req.query.provider === "google" && body.id) || (req.query.provider === "instagram" && body.data && body.data.id))) {
+                                                let socialUserId;
+                                                let socialUserEmail;
+                                                let socialUserName;
+                                                let socialUserProfilePictureUrl;
+                                                let socialUserExtraData;
+
+                                                if (req.query.provider === "facebook") {
+                                                    socialUserId = body.id;
+                                                    if (body.email) socialUserEmail = body.email;
+                                                    if (body.name) socialUserName = body.name;
+                                                    if (body.picture && body.picture.data && body.picture.data.url) socialUserProfilePictureUrl = body.picture.data.url;
+                                                } else if (req.query.provider === "google") {
+                                                    socialUserId = body.id;
+                                                    if (body.email) socialUserEmail = body.email;
+                                                    if (body.name) socialUserName = body.name;
+                                                    if (body.picture) socialUserProfilePictureUrl = body.picture;
+                                                    socialUserExtraData = {
+                                                        serverAuthCode: req.query.code
+                                                    };
+                                                } else if (req.query.provider === "instagram") {
+                                                    socialUserId = body.data.id;
+                                                    if (body.data.full_name) socialUserName = body.data.full_name;
+                                                    if (body.data.profile_picture) socialUserProfilePictureUrl = body.data.profile_picture;
+                                                }
+
+                                                socialLoginHandle(socialUserAccessToken, socialUserId, socialUserEmail, socialUserName, socialUserProfilePictureUrl, socialUserExtraData);
+                                            } else {
+                                                console.log("Unexpected Profile response:", {
+                                                    query: req.query,
+                                                    getData: getData,
+                                                    error: error,
+                                                    response: response,
+                                                    body: body
+                                                });
+                                                res.status(200).send({ error: true });
+                                            }
+                                        } else {
+                                            res.status(200).send({ error: true });
+                                        }
+                                    });
+                                } else {
+                                    console.log("Unexpected Token Response:", {
+                                        query: req.query,
+                                        postData: postData,
+                                        error: error,
+                                        response: response,
+                                        body: body
+                                    });
+                                    if (body && ((body.error && body.error.message) || body.error_description || body.error_message)) {
+                                        res.status(200).send({ message: (body.error_description || body.error_message || body.error.message) });
+                                    } else {
+                                        res.status(200).send({ error: true });
+                                    }
+                                }
+                            } else {
+                                res.status(200).send({ error: true });
+                            }
+                        });
+                    }
                 } else {
+                    console.log("Unable to find firebase user to link in request:", req.query);
                     res.status(200).send({ error: true });
                 }
             });
         } else {
+            console.log("Error in request:", req.query);
             res.status(200).send({ error: true });
         }
     });
 });
-// [END handleInstagramLoginTrigger]
-// [END handleInstagramLogin]
+// [END handleSocialLoginTrigger]
+// [END handleSocialLogin]
+
+// [START sendNotificationsOnDiaryActivity]
+/**
+ * Handle sending notifications on diary activity.
+ */
+// [START sendNotificationsOnDiaryActivityTrigger]
+exports.sendNotificationsOnDiaryActivity = functions.database.ref("/activities/diaries/{diaryId}/{activityId}").onWrite(event => {
+    if (event.data.exists() && !event.data.previous.exists()) {
+        let diaryId = event.params.diaryId;
+        let activityId = event.params.activityId;
+        let activity = event.data.val();
+
+        return admin.database().ref(`/diaries/${diaryId}`).once("value").then(snapshot => {
+            let diary = snapshot.val();
+
+            if (diary && diary.ownerName && diary.ownerPersonId) {
+                let diaryName = diary.ownerName;
+                let diaryOwnerPersonId = diary.ownerPersonId;
+
+                return admin.database().ref(`/persons/${diaryOwnerPersonId}/members`).once("value").then(snapshot => {
+                    let diaryOwnerPersonMemberPersonIds = [diaryOwnerPersonId];
+
+                    snapshot.forEach(member => {
+                        diaryOwnerPersonMemberPersonIds.push(member.key);
+                    });
+
+                    if (diaryOwnerPersonMemberPersonIds.length > 0) {
+                        let tokens = [];
+                        let notificationTokenPromises = [];
+                        let diaryOwnerPersonMemberUserIds = {};
+
+                        for (let index in diaryOwnerPersonMemberPersonIds) {
+                            let diaryOwnerPersonMemberPersonId = diaryOwnerPersonMemberPersonIds[index];
+
+                            notificationTokenPromises.push(admin.database().ref(`/persons/${diaryOwnerPersonMemberPersonId}/userId`).once("value").then(snapshot => {
+                                let diaryOwnerPersonMemberUserId = snapshot.val();
+
+                                if (diaryOwnerPersonMemberUserId) {
+                                    if (!diaryOwnerPersonMemberUserIds[diaryOwnerPersonMemberUserId] && diaryOwnerPersonMemberUserId !== activity.userId) {
+                                        diaryOwnerPersonMemberUserIds[diaryOwnerPersonMemberUserId] = true;
+
+                                        return admin.database().ref("/notificationTokens").orderByChild("userId").equalTo(diaryOwnerPersonMemberUserId).once("value").then(snapshot => {
+                                            snapshot.forEach(notificationToken => {
+                                                tokens.push(notificationToken.key);
+                                            });
+                                        }).catch(reason => {
+                                            //TODODEV
+                                            console.log(`NotificationTokens query failed for dirayId '${diaryId}' of activityId '${activityId}' for DiaryOwnerPerson's member with UserId '${diaryOwnerPersonMemberUserId}'.`, reason);
+                                        });
+                                    } else {
+                                        return Promise.resolve();
+                                    }
+                                } else {
+                                    //TODODEV
+                                    console.log(`Person's UserId not found for dirayId '${diaryId}' of activityId '${activityId}' for DiaryOwnerPerson's member with PersonId '${diaryOwnerPersonMemberPersonId}'.`);
+                                }
+                            }).catch(reason => {
+                                //TODODEV
+                                console.log(`Person's UserId query failed for dirayId '${diaryId}' of activityId '${activityId}' for DiaryOwnerPerson's member with PersonId '${diaryOwnerPersonMemberPersonId}'.`, reason);
+                            }));
+                        }
+
+                        return Promise.all(notificationTokenPromises).then(() => {
+                            if (tokens.length > 0) {
+                                let notificationMessages = {};
+                                let formatString = (stringToFormat, values) => {
+                                    if (stringToFormat && values && values.length && values.length > 0) {
+                                        for (let index = 0; index < values.length; index++) {
+                                            stringToFormat = stringToFormat.replace(new RegExp("\\{" + index + "\\}", "gm"), (values[index] || ""));
+                                        }
+                                    }
+
+                                    return stringToFormat;
+                                };
+
+                                for (let language in i18n) {
+                                    let notificationMessageTemplate = i18n[language].labelResources.activities[activity.activityType];
+
+                                    if (notificationMessageTemplate) {
+                                        let notificationMessage;
+
+                                        switch (activity.activityType) {
+                                            case activityTypes.diaryAdded:
+                                            case activityTypes.diaryDeleted:
+                                            case activityTypes.diaryLiked:
+                                            case activityTypes.diaryCommented:
+                                                notificationMessage = formatString(notificationMessageTemplate, [
+                                                    activity.userName || ""
+                                                    , diaryName || ""
+                                                    , (activity.createdOn ? DateTransformation.transformDate(activity.createdOn) : "")
+                                                ]);
+
+                                                break;
+                                            case activityTypes.entryAdded:
+                                            case activityTypes.entryDeleted:
+                                            case activityTypes.entryLiked:
+                                            case activityTypes.entryCommented:
+                                                notificationMessage = formatString(notificationMessageTemplate, [
+                                                    activity.userName || ""
+                                                    , (activity.context && activity.context.contents && activity.context.contents.entry ? activity.context.contents.entry : "")
+                                                    , diaryName || ""
+                                                    , (activity.createdOn ? DateTransformation.transformDate(activity.createdOn) : "")
+                                                ]);
+
+                                                break;
+                                            case activityTypes.storyAdded:
+                                            case activityTypes.storyDeleted:
+                                                notificationMessage = formatString(notificationMessageTemplate, [
+                                                    activity.userName || ""
+                                                    , (activity.context && activity.context.contents && activity.context.contents.story ? activity.context.contents.story : "")
+                                                    , (activity.context && activity.context.contents && activity.context.contents.entry ? activity.context.contents.entry : "")
+                                                    , diaryName || ""
+                                                    , (activity.createdOn ? DateTransformation.transformDate(activity.createdOn) : "")
+                                                ]);
+
+                                                break;
+                                            case activityTypes.storyLiked:
+                                            case activityTypes.storyCommented:
+                                                notificationMessage = formatString(notificationMessageTemplate, [
+                                                    activity.userName || ""
+                                                    , (activity.context && activity.context.contents && activity.context.contents.story ? activity.context.contents.story : "")
+                                                    , (activity.createdOn ? DateTransformation.transformDate(activity.createdOn) : "")
+                                                ]);
+
+                                                break;
+                                            case activityTypes.imageAdded:
+                                            case activityTypes.imageDeleted:
+                                                notificationMessage = formatString(notificationMessageTemplate, [
+                                                    activity.userName || ""
+                                                    , (activity.context && activity.context.contents && activity.context.contents.entry ? activity.context.contents.entry : "")
+                                                    , diaryName || ""
+                                                    , (activity.createdOn ? DateTransformation.transformDate(activity.createdOn) : "")
+                                                ]);
+
+                                                break;
+                                            case activityTypes.imageLiked:
+                                            case activityTypes.imageCommented:
+                                                notificationMessage = formatString(notificationMessageTemplate, [
+                                                    activity.userName || ""
+                                                    , (activity.createdOn ? DateTransformation.transformDate(activity.createdOn) : "")
+                                                ]);
+
+                                                break;
+                                            case activityTypes.collectionAdded:
+                                                notificationMessage = formatString(notificationMessageTemplate, [
+                                                    activity.userName || ""
+                                                    , (activity.context && activity.context.contentCount ? activity.context.contentCount : 0)
+                                                    , (activity.context && activity.context.title ? activity.context.title : "")
+                                                    , (activity.context && activity.context.contents && activity.context.contents.entry ? activity.context.contents.entry : "")
+                                                    , diaryName || ""
+                                                    , (activity.createdOn ? DateTransformation.transformDate(activity.createdOn) : "")
+                                                ]);
+
+                                                break;
+                                            case activityTypes.collectionDeleted:
+                                                notificationMessage = formatString(notificationMessageTemplate, [
+                                                    activity.userName || ""
+                                                    , (activity.context && activity.context.contentCount ? activity.context.contentCount : 0)
+                                                    , (activity.context && activity.context.contents && activity.context.contents.entry ? activity.context.contents.entry : "")
+                                                    , diaryName || ""
+                                                    , (activity.createdOn ? DateTransformation.transformDate(activity.createdOn) : "")
+                                                ]);
+
+                                                break;
+                                            case activityTypes.collectionLiked:
+                                            case activityTypes.collectionCommented:
+                                                notificationMessage = formatString(notificationMessageTemplate, [
+                                                    activity.userName || ""
+                                                    , (activity.context && activity.context.contents && activity.context.contents.entry ? activity.context.contents.entry : "")
+                                                    , (activity.createdOn ? DateTransformation.transformDate(activity.createdOn) : "")
+                                                ]);
+
+                                                break;
+                                            case activityTypes.videoAdded:
+                                            case activityTypes.videoDeleted:
+                                                notificationMessage = formatString(notificationMessageTemplate, [
+                                                    activity.userName || ""
+                                                    , (activity.context && activity.context.contents && activity.context.contents.entry ? activity.context.contents.entry : "")
+                                                    , diaryName || ""
+                                                    , (activity.createdOn ? DateTransformation.transformDate(activity.createdOn) : "")
+                                                ]);
+
+                                                break;
+                                            case activityTypes.videoLiked:
+                                            case activityTypes.videoCommented:
+                                                notificationMessage = formatString(notificationMessageTemplate, [
+                                                    activity.userName || ""
+                                                    , (activity.createdOn ? DateTransformation.transformDate(activity.createdOn) : "")
+                                                ]);
+
+                                                break;
+                                        }
+
+                                        if (notificationMessage) {
+                                            notificationMessages[language] = notificationMessage;
+                                        } else {
+                                            //TODODEV
+                                            console.log(`Notification message could not be prepared for '${language}' language & '${activity.activityType}' activityType of activity with Id '${activityId}'.`);
+                                        }
+                                    } else {
+                                        //TODODEV
+                                        console.log(`Notification message template not found for '${language}' language & '${activity.activityType}' activityType of activity with Id '${activityId}'.`);
+                                    }
+                                }
+
+                                let userLanguage = "en";
+                                if (notificationMessages[userLanguage]) {
+                                    //You can send messages to up to 1,000 devices in a single request. If you provide an array with over 1,000 registration tokens, the request will fail with a messaging/invalid-recipient error.
+                                    let tokenChunks = [];
+                                    while (tokens.length > 500) {
+                                        tokenChunks.push(tokens.splice(0, 500));
+                                    }
+                                    if (tokens.length > 0) {
+                                        tokenChunks.push(tokens);
+                                    }
+
+                                    let payload = {
+                                        notification: {
+                                            title: i18n[userLanguage].appName //iOS, Android, Web: The notification's title.
+                                            , body: notificationMessages[userLanguage] //iOS, Android, Web: The notification's body text.
+                                            // , badge?: string, //???
+                                            // , clickAction: string, //???
+                                            // , color: string, //???
+                                            // , icon: string, //???
+                                            // , sound: string, //???
+                                            // , tag: string //???
+                                        }
+                                    };
+                                    // payload.data = { key1: "value1", key2: "value2" }; //The keys and values must both be strings. Keys can be any custom string, except for the following reserved strings: "from" & Anything starting with "google."
+
+                                    let sendNotificationPromises = [];
+                                    for (let index in tokenChunks) {
+                                        let tokenChunk = tokenChunks[index];
+
+                                        sendNotificationPromises.push(admin.messaging().sendToDevice(tokenChunk, payload, {
+                                            contentAvailable: true //On iOS, use this field to represent content-available in the APNs payload. When a notification or data message is sent and this is set to true, an inactive client app is awoken. On Android, data messages wake the app by default. On Chrome, this flag is currently not supported.
+                                            , dryRun: false //Whether or not the message should actually be sent. When set to true, allows developers to test a request without actually sending a message. When set to false, the message will be sent.
+                                            , mutableContent: false //On iOS, use this field to represent mutable-content in the APNs payload. When a notification is sent and this is set to true, the content of the notification can be modified before it is displayed, using a Notification Service app extension. On Android and Web, this parameter will be ignored.
+                                            , priority: "high" //The priority of the message. Valid values are "normal" and "high". On iOS, these correspond to APNs priorities 5 and 10. By default, notification messages are sent with high priority, and data messages are sent with normal priority. Normal priority optimizes the client app's battery consumption and should be used unless immediate delivery is required. For messages with normal priority, the app may receive the message with unspecified delay. When a message is sent with high priority, it is sent immediately, and the app can wake a sleeping device and open a network connection to your server.
+                                            , timeToLive: 2419200 //How long (in seconds) the message should be kept in FCM storage if the device is offline. The maximum time to live supported is four weeks, and the default value is also four weeks.  Keep in mind that a time_to_live value of 0 means messages that can't be delivered immediately are discarded.
+                                            // , collapseKey: string //String identifying a group of messages (for example, "Updates Available") that can be collapsed, so that only the last message gets sent when delivery can be resumed. This is used to avoid sending too many of the same messages when the device comes back online or becomes active. There is no guarantee of the order in which messages get sent. A maximum of four different collapse keys is allowed at any given time. This means an FCM connection server can simultaneously store four different send-to-sync messages per client app. If you exceed this number, there is no guarantee which four collapse keys the FCM connection server will keep.
+                                        }).then(response => {
+                                            //TODODEV
+                                            console.log(`Notification Sent Response for language '${userLanguage}' for dirayId '${diaryId}' of activity with Id '${activityId}'.:`, response);
+                                        }).catch(reason => {
+                                            //TODODEV
+                                            console.log(`Notification Sent Reason for language '${userLanguage}' for dirayId '${diaryId}' of activity with Id '${activityId}'.:`, reason);
+                                        }));
+                                    }
+
+                                    return Promise.all(sendNotificationPromises);
+                                } else {
+                                    //TODODEV
+                                    console.log(`Notification message not available for language '${userLanguage}' for dirayId '${diaryId}' of activity with Id '${activityId}'.`);
+                                }
+                            } else {
+                                //TODODEV
+                                console.log(`Notification tockens not available for dirayId '${diaryId}' of activity with Id '${activityId}'.`);
+                            }
+                        });
+                    } else {
+                        //TODODEV
+                        console.log(`DiaryOwnerPerson's members not available for dirayId '${diaryId}' of activity with Id '${activityId}'.`);
+                    }
+                }).catch(reason => {
+                    //TODODEV
+                    console.log(`DiaryOwnerPerson's members not available for dirayId '${diaryId}' of activity with Id '${activityId}'. Reason:`, reason);
+                });
+            } else {
+                //TODODEV
+                console.log(`Diary or DiaryName or DiaryOwnerPersonId not available for dirayId '${diaryId}' of activity with Id '${activityId}'. Diary:`, diary);
+            }
+        }).catch(reason => {
+            //TODODEV
+            console.log(`Diary name not available for dirayId '${diaryId}' of activity with Id '${activityId}'. Reason:`, reason);
+        });
+    }
+});
+// [END sendNotificationsOnDiaryActivityTrigger]
+class DateTransformation {
+    static transform(value, args) {
+        value = value + '';
+        args = args + '';
+
+        return moment(value).format(args)
+    }
+
+    static transformDate(value) {
+        if (DateTransformation.isToday(value)) {
+            return DateTransformation.transform(value, "LT");
+        } else if (DateTransformation.isYesterday(value)) {
+            return DateTransformation.transform(value, "[Yesterday at] LT");
+        }
+
+        return DateTransformation.transform(value, "lll");
+    }
+
+    static isToday(value) {
+        return moment(value).isSame(moment().clone().startOf('day'), 'd');
+    }
+
+    static isYesterday(value) {
+        return moment(value).isSame(moment().subtract(1, 'days').startOf('day'), 'd');
+    }
+
+    static isWithinAWeek(value) {
+        return moment(value).isAfter(moment().subtract(7, 'days').startOf('day'));
+    }
+
+    static isTwoWeeksOrMore(value) {
+        return !DateTransformation.isWithinAWeek(moment(value));
+    }
+}
+// [END sendNotificationsOnDiaryActivity]
+
+// [START sendTestNotification]
+/**
+ * Handle sending test notifications to a user.
+ */
+// [START sendTestNotificationTrigger]
+exports.sendTestNotification = functions.https.onRequest((req, res) => {
+    cors(req, res, () => {
+        if (req && req.query && req.query.userId && req.query.title && req.query.body) {
+            admin.database().ref("/notificationTokens").orderByChild("userId").equalTo(req.query.userId).once("value").then(snapshot => {
+                let notificationTokens = snapshot.val();
+                if (notificationTokens) {
+                    let tokens = [];
+                    for (let notificationToken in notificationTokens) {
+                        tokens.push(notificationToken);
+                    }
+                    if (tokens.length > 0) {
+                        //You can send messages to up to 1,000 devices in a single request. If you provide an array with over 1,000 registration tokens, the request will fail with a messaging/invalid-recipient error.
+                        let tokenChunks = [];
+                        while (tokens.length > 500) {
+                            tokenChunks.push(tokens.splice(0, 500));
+                        }
+                        if (tokens.length > 0) {
+                            tokenChunks.push(tokens);
+                        }
+
+                        let payload = {
+                            notification: {
+                                title: req.query.title //iOS, Android, Web: The notification's title.
+                                , body: req.query.body //iOS, Android, Web: The notification's body text.
+                                // , badge?: string, //???
+                                // , clickAction: string, //???
+                                // , color: string, //???
+                                // , icon: string, //???
+                                // , sound: string, //???
+                                // , tag: string //???
+                            }
+                        };
+                        if (req.query.data && Object.keys(req.query.data).length > 0) {
+                            payload.data = req.query.data; //The keys and values must both be strings. Keys can be any custom string, except for the following reserved strings: "from" & Anything starting with "google."
+                        }
+
+                        for (let index in tokenChunks) {
+                            let tokenChunk = tokenChunks[index];
+
+                            admin.messaging().sendToDevice(tokenChunk, payload, {
+                                contentAvailable: true //On iOS, use this field to represent content-available in the APNs payload. When a notification or data message is sent and this is set to true, an inactive client app is awoken. On Android, data messages wake the app by default. On Chrome, this flag is currently not supported.
+                                , dryRun: false //Whether or not the message should actually be sent. When set to true, allows developers to test a request without actually sending a message. When set to false, the message will be sent.
+                                , mutableContent: false //On iOS, use this field to represent mutable-content in the APNs payload. When a notification is sent and this is set to true, the content of the notification can be modified before it is displayed, using a Notification Service app extension. On Android and Web, this parameter will be ignored.
+                                , priority: "high" //The priority of the message. Valid values are "normal" and "high". On iOS, these correspond to APNs priorities 5 and 10. By default, notification messages are sent with high priority, and data messages are sent with normal priority. Normal priority optimizes the client app's battery consumption and should be used unless immediate delivery is required. For messages with normal priority, the app may receive the message with unspecified delay. When a message is sent with high priority, it is sent immediately, and the app can wake a sleeping device and open a network connection to your server.
+                                , timeToLive: 2419200 //How long (in seconds) the message should be kept in FCM storage if the device is offline. The maximum time to live supported is four weeks, and the default value is also four weeks.  Keep in mind that a time_to_live value of 0 means messages that can't be delivered immediately are discarded.
+                                // , collapseKey: string //String identifying a group of messages (for example, "Updates Available") that can be collapsed, so that only the last message gets sent when delivery can be resumed. This is used to avoid sending too many of the same messages when the device comes back online or becomes active. There is no guarantee of the order in which messages get sent. A maximum of four different collapse keys is allowed at any given time. This means an FCM connection server can simultaneously store four different send-to-sync messages per client app. If you exceed this number, there is no guarantee which four collapse keys the FCM connection server will keep.
+                            }).then(response => {
+                                console.log("Notification Sent:", response);
+                                res.status(200).send();
+                            }).catch(reason => {
+                                console.log("Notification Sent Reason:", reason);
+                                res.status(200).send();
+                            });
+                        }
+                    } else {
+                        res.status(200).send();
+                    }
+                }
+            }).catch(reason => {
+                console.log("NotificationTokens query Reason: ", reason);
+                res.status(200).send();
+            });
+        } else {
+            res.status(200).send();
+        }
+    });
+});
+// [END sendTestNotificationTrigger]
+// [END sendTestNotification]
